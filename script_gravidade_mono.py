@@ -371,6 +371,11 @@ class gravidade(MsClassic_mono):
                     temp_hs = np.array(temp_hs)
                     temp_kgr = np.array(temp_kgr)
                     b[map_volumes[volume]] += - (np.dot(temp_hs, temp_kgr))
+                    print(- (np.dot(temp_hs, temp_kgr)))
+                    print(temp_hs)
+                    print(temp_kgr)
+                    print('\n')
+                    import pdb; pdb.set_trace()
                     if volume in self.wells_n:
                         #4
                         index = self.wells_n.index(volume)
@@ -441,8 +446,9 @@ class gravidade(MsClassic_mono):
         del self.Pms_all
         self.erro()
 
+        self.test_conservation_coarse_gr()
         self.Neuman_problem_6_gr()
-        self.store_flux_pms_gr = self.create_flux_vector_pms_gr()
+        #self.store_flux_pms_gr = self.create_flux_vector_pms_gr()
 
 
 
@@ -452,5 +458,66 @@ class gravidade(MsClassic_mono):
 
         print('acaboooou')
         self.mb.write_file('new_out_mono.vtk')
+
+    def test_conservation_coarse_gr(self):
+        """
+        verifica se o fluxo é conservativo nos volumes da malha grossa
+        utilizando a pressao multiescala para calcular os fluxos na interface dos mesmos
+        """
+
+        #0
+        volumes_in_primal_set = self.mb.tag_get_data(self.volumes_in_primal_tag, 0, flat=True)[0]
+        volumes_in_primal_set = self.mb.get_entities_by_handle(volumes_in_primal_set)
+        lim = 10**(-6)
+        soma = 0
+        Qc2 = []
+        prim = []
+        for primal in self.primals:
+            #1
+            Qc = 0
+            # my_adjs = set()
+            primal_id1 = self.mb.tag_get_data(self.primal_id_tag, primal, flat=True)[0]
+            primal_id = self.ident_primal[primal_id1]
+            fine_elems_in_primal = self.mb.get_entities_by_handle(primal)
+            volumes_in_primal = set(fine_elems_in_primal) & set(volumes_in_primal_set)
+            for volume in volumes_in_primal:
+                #2
+                adjs_vol = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+                for adj in adjs_vol:
+                    #3
+                    if adj in fine_elems_in_primal:
+                        continue
+                    # my_adjs.add(adj)
+                    pvol = self.mb.tag_get_data(self.pms_tag, volume, flat=True)[0]
+                    padj = self.mb.tag_get_data(self.pms_tag, adj, flat=True)[0]
+                    kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+                    kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                    centroid_volume = self.mesh_topo_util.get_average_position([volume])
+                    centroid_adj = self.mesh_topo_util.get_average_position([adj])
+                    z_vol = self.tz - centroid_volume[2]
+                    z_adj = self.tz - centroid_adj[2]
+                    direction = centroid_adj - centroid_volume
+                    uni = self.unitary(direction)
+                    kvol = np.dot(np.dot(kvol,uni),uni)
+                    kadj = np.dot(np.dot(kadj,uni),uni)
+                    keq = self.kequiv(kvol, kadj)
+                    keq = keq*(np.dot(self.A, uni))/(self.mi) #*np.dot(self.h, uni))
+                    grad_p = (padj - pvol)/float(abs(np.dot(direction, uni)))
+                    grad_z = (z_adj - z_vol)/float(abs(np.dot(direction, uni)))
+                    q = (grad_p)*keq - grad_z*keq*self.gama
+                    Qc += q
+            #1
+            # print('Primal:{0} ///// Qc: {1}'.format(primal_id, Qc))
+            Qc2.append(Qc)
+            prim.append(primal_id)
+            self.mb.tag_set_data(self.flux_coarse_tag, fine_elems_in_primal, np.repeat(Qc, len(fine_elems_in_primal)))
+            # if Qc > lim:
+            #     print('Qc nao deu zero')
+            #     import pdb; pdb.set_trace()
+        with open('Qc_gr.txt', 'w') as arq:
+            for i,j in zip(prim, Qc2):
+                arq.write('Primal:{0} ///// Qc: {1}\n'.format(i, j))
+            arq.write('\n')
+            arq.write('sum Qc:{0}'.format(sum(Qc2)))
 
 sim_grav_mono = gravidade(ind = True)
