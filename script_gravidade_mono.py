@@ -1,5 +1,6 @@
 from test34 import MsClassic_mono
 import time
+import numpy as np
 
 class gravidade(MsClassic_mono):
     def __init__(self, ind = False):
@@ -18,6 +19,7 @@ class gravidade(MsClassic_mono):
         lim4 = 1e-4
         soma = 0
         soma2 = 0
+        soma3 = 0
         store_flux_pf = {}
 
         for volume in self.all_fine_vols:
@@ -25,6 +27,7 @@ class gravidade(MsClassic_mono):
             flux = {}
             kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
             centroid_volume = self.mesh_topo_util.get_average_position([volume])
+            z_vol = self.tz - centroid_volume[2]
             adjs_vol = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
             gid_vol = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
             pvol = self.mb.tag_get_data(self.pf_tag, volume, flat=True)[0]
@@ -34,17 +37,22 @@ class gravidade(MsClassic_mono):
                 padj = self.mb.tag_get_data(self.pf_tag, adj, flat=True)[0]
                 kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
                 centroid_adj = self.mesh_topo_util.get_average_position([adj])
+                z_adj = self.tz - centroid_adj[2]
                 direction = centroid_adj - centroid_volume
+                altura = centroid_adj[2]
                 unit = direction/np.linalg.norm(direction)
                 #unit = vetor unitario na direcao de direction
                 uni = self.unitary(direction)
+                z = uni[2]
                 # uni = valor positivo do vetor unitario
                 kvol = np.dot(np.dot(kvol,uni),uni)
                 kadj = np.dot(np.dot(kadj,uni),uni)
                 keq = self.kequiv(kvol, kadj)
                 keq = keq*(np.dot(self.A, uni))/(self.mi)
                 grad_p = (padj - pvol)/float(abs(np.dot(direction, uni)))
-                q = (grad_p)*keq
+                grad_z = (z_adj - z_vol)/float(abs(np.dot(direction, uni)))
+
+                q = (grad_p)*keq - grad_z*keq*self.gama
                 flux[tuple(unit)] = q
                 kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
             #1
@@ -120,7 +128,7 @@ class gravidade(MsClassic_mono):
         for adj in adj_volumes:
             #2
             gid2 = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
-            temp_ps.append(padj)
+            #temp_ps.append(padj)
             adj_centroid = self.mesh_topo_util.get_average_position([adj])
             direction = adj_centroid - volume_centroid
             altura = adj_centroid[2]
@@ -152,7 +160,7 @@ class gravidade(MsClassic_mono):
         temp_kgr.append(-sum(temp_kgr))
         temp_k.append(-sum(temp_k))
         temp_ids.append(map_id[volume])
-        temp_ps.append(pvol)
+        #temp_ps.append(pvol)
         import pdb; pdb.set_trace()
 
         return temp_k, temp_ids, temp_hs, temp_kgr
@@ -162,6 +170,7 @@ class gravidade(MsClassic_mono):
         roda o programa inteiro adicionando o efeito da gravidade
         """
 
+        # Solucao direta
         self.set_contorno()
         self.set_global_problem_gr_vf_3()
         self.Pf = self.solve_linear_problem(self.trans_fine, self.b, len(self.all_fine_vols_ic))
@@ -169,7 +178,34 @@ class gravidade(MsClassic_mono):
         del self.Pf
         self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.asarray(self.Pf_all))
         del self.Pf_all
+        self.store_flux_pf = self.create_flux_vector_pf_gr()
 
+        # Solucao Multiescala
+        self.calculate_restriction_op_2()
+        self.calculate_prolongation_op_het()
+        self.organize_op()
+        self.Tc = self.modificar_matriz(self.pymultimat(self.pymultimat(self.trilOR, self.trans_fine, self.nf_ic), self.trilOP, self.nf_ic), self.nc, self.nc)
+        self.Qc = self.modificar_vetor(self.multimat_vector(self.trilOR, self.nf_ic, self.b), self.nc)
+        self.Pc = self.solve_linear_problem(self.Tc, self.Qc, self.nc)
+        self.set_Pc()
+        self.Pms = self.multimat_vector(self.trilOP, self.nf_ic, self.Pc)
+
+        del self.trilOP
+        del self.trilOR
+        del self.Tc
+        del self.Qc
+        del self.Pc
+
+        self.organize_Pms()
+        del self.Pms
+        self.mb.tag_set_data(self.pms_tag, self.all_fine_vols, np.asarray(self.Pms_all))
+        del self.Pms_all
+        self.erro()
+
+
+
+
+        print('acaboooou')
         self.mb.write_file('new_out_mono.vtk')
 
 sim_grav_mono = gravidade(ind = True)

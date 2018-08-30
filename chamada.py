@@ -12,7 +12,7 @@ chamada5 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 b
 chamada6 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_bif.py\"'
 chamada7 = 'python fazer_graficos_mono.py'
 chamada8 = 'python fazer_graficos_bif.py'
-chamada9 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python script_gravidade.py\"'
+chamada9 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python script_gravidade_mono.py\"'
 chamada10 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python -m Preprocessor.py structured.cfg\"'
 chamada11 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python -m Preprocess structured.cfg\"'
 
@@ -24,6 +24,10 @@ chamada22 = 'sudo docker run -it -v $PWD:/elliptic presto bash -c \"cd /elliptic
 
 """
 sudo docker run -it -v $PWD:/elliptic presto bash -c "cd /elliptic; python -m elliptic.Preprocess structured.cfg"
+sudo docker pull padmec/elliptic:1.0
+sudo docker pull padmec/pymoab-pytrilinos:3.6
+
+
 """
 
 
@@ -35,16 +39,16 @@ sudo docker run -it -v $PWD:/elliptic presto bash -c "cd /elliptic; python -m el
 l1 = [chamada1, chamada2]
 l2 = [chamada4, chamada5]
 l3 = [chamada4, chamada6]
-l4 = [chamada4, chamada9]
+l4 = [chamada11, chamada9]
 
 
 # os.chdir(principal)
 # os.system(chamada5)
+#
+for i in l4:
+    os.system(i)
 
-# for i in l2:
-#     os.system(i)
-
-os.system(chamada5)
+# os.system(chamada9)
 
 
 

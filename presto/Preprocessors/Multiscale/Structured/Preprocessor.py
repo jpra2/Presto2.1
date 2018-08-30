@@ -214,4 +214,4 @@ class Preprocessor(object):
                              "under the [StructuredMS] section in the config "
                              "file.")
 
-        self._block_size = [int(v) for v in values]
+        self._block_size = [float(v) for v in values]

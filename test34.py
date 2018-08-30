@@ -8,6 +8,7 @@ import math
 import os
 import shutil
 import random
+import sys
 
 
 class MsClassic_mono:
@@ -87,7 +88,7 @@ class MsClassic_mono:
             self.map_vols_ic_2 = dict(zip(range(len(self.all_fine_vols_ic)), list(self.all_fine_vols_ic)))
             self.nf_ic = len(self.all_fine_vols_ic)
 
-            self.run_2()
+            # self.run_2()
 
     funcoes = [
        lambda x: (x/np.linalg.norm(x))*(x/np.linalg.norm(x)), # unitario positivo na direcao de x
