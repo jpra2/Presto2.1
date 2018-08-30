@@ -87,7 +87,7 @@ class MsClassic_mono:
             self.map_vols_ic_2 = dict(zip(range(len(self.all_fine_vols_ic)), list(self.all_fine_vols_ic)))
             self.nf_ic = len(self.all_fine_vols_ic)
 
-            # self.run_2()
+            self.run_2()
 
     funcoes = [
        lambda x: (x/np.linalg.norm(x))*(x/np.linalg.norm(x)), # unitario positivo na direcao de x
@@ -2213,7 +2213,7 @@ class MsClassic_mono:
         volume_centroid = self.mesh_topo_util.get_average_position([volume])
         adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
         kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
-        soma = 0.0
+        # soma = 0.0
         temp_ids = []
         temp_k = []
         for adj in adj_volumes:
@@ -3657,11 +3657,11 @@ class MsClassic_mono:
                 index = self.wells_n.index(volume)
                 if volume in self.wells_inj:
                     #3
-                    self.b[self.map_vols_ic[volume]] = self.set_q[index]
+                    self.b[self.map_vols_ic[volume]] += self.set_q[index]
                 #2
                 else:
                     #3
-                    self.b[self.map_vols_ic[volume]] = -self.set_q[index]
+                    self.b[self.map_vols_ic[volume]] += -self.set_q[index]
         #0
         for volume in self.neigh_wells_d:
             #1
