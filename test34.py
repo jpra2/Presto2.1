@@ -4009,8 +4009,7 @@ class MsClassic_mono:
             fine_elems_in_primal = self.mb.get_entities_by_handle(primal)
             volumes_in_interface, volumes_in_primal = self.get_volumes_in_interfaces(
             fine_elems_in_primal, primal_id, flag = 1)
-            for volume in volumes_in_primal:
-                self.mb.add_entities(volumes_in_primal_set, [volume])
+            self.mb.add_entities(volumes_in_primal_set, volumes_in_primal)
         self.mb.tag_set_data(self.volumes_in_primal_tag, 0, volumes_in_primal_set)
 
         # volumes_in_primal_set = self.mb.tag_get_data(self.volumes_in_primal_tag, 0, flat=True)[0]
