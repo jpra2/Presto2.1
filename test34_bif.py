@@ -557,6 +557,7 @@ class Msclassic_bif:
                 kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
                 lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume, flat=True)[0]
                 lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume, flat=True)[0]
+                lbt_vol = lamb_w_vol + lamb_o_vol
                 fw_vol = self.mb.tag_get_data(self.fw_tag, volume, flat=True)[0]
                 sat_vol = self.mb.tag_get_data(self.sat_tag, volume, flat=True)[0]
                 centroid_volume = self.mesh_topo_util.get_average_position([volume])
@@ -579,6 +580,7 @@ class Msclassic_bif:
                     kadj = np.dot(np.dot(kadj,uni),uni)
                     lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj, flat=True)[0]
                     lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj, flat=True)[0]
+                    lbt_adj = lamb_w_adj + lamb_o_adj
                     fw_adj = self.mb.tag_get_data(self.fw_tag, adj, flat=True)[0]
 
                     keq3 = (kvol*lamb_w_vol + kadj*lamb_w_adj)/2.0
@@ -587,6 +589,9 @@ class Msclassic_bif:
                     kadj = kadj*(lamb_w_adj + lamb_o_adj)
 
                     keq = self.kequiv(kvol, kadj)
+
+
+                    grad_p = (padj - pvol)/float(abs(np.dot(direction, uni)))
 
                     list_keq.append(keq)
                     list_p.append(padj)
@@ -597,7 +602,7 @@ class Msclassic_bif:
                     keq = keq*(np.dot(self.A, uni))
                     #pvol2 = self.mb.tag_get_data(self.pms_tag, volume, flat=True)[0]
                     #padj2 = self.mb.tag_get_data(self.pms_tag, adj, flat=True)[0]
-                    grad_p = (padj - pvol)/float(abs(np.dot(direction, uni)))
+
                     #grad_p2 = (padj2 - pvol2)/float(abs(np.dot(direction, uni)))
                     q = (grad_p)*keq
                     qw3.append(grad_p*keq3*(np.dot(self.A, uni)))
@@ -716,7 +721,6 @@ class Msclassic_bif:
             arq.write('soma_inj:{0}\n'.format(sum(soma_inj)))
             arq.write('soma_prod:{0}\n'.format(sum(soma_prod)))
             arq.write('tempo:{0}'.format(self.tempo))
-
 
     def create_flux_vector_pms(self):
         """
@@ -2663,9 +2667,10 @@ class Msclassic_bif:
                 print('Erroooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo')
             print('\n')"""
 
-    def set_global_problem_vf_2(self):
+    def set_global_problem_vf_2(self, vector_flux):
         """
         transmissibilidade da malha fina excluindo os volumes com pressao prescrita
+        usando upwind
         """
         #0
         std_map = Epetra.Map(len(self.all_fine_vols_ic),0,self.comm)
@@ -2673,30 +2678,39 @@ class Msclassic_bif:
         self.b = Epetra.Vector(std_map)
         for volume in self.all_fine_vols_ic - set(self.neigh_wells_d):
             #1
+            p_vol = self.mb.tag_get_data(p_tag, volume, flat=True)[0]
             volume_centroid = self.mesh_topo_util.get_average_position([volume])
             adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
             kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
             global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
             lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume)[0][0]
             lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume)[0][0]
+            lbt_vol = lamb_w_vol + lamb_o_vol
             soma = 0.0
             temp_glob_adj = []
             temp_k = []
             for adj in adj_volumes:
                 #2
+                p_adj = self.mb.tag_get_data(p_tag, adj, flat=True)[0]
                 global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
                 adj_centroid = self.mesh_topo_util.get_average_position([adj])
                 direction = adj_centroid - volume_centroid
                 uni = self.unitary(direction)
+                unit = direction/np.linalg.norm(direction)
                 kvol = np.dot(np.dot(kvol,uni),uni)
-                kvol = kvol*(lamb_w_vol + lamb_o_vol)
+                #kvol = kvol*(lamb_w_vol + lamb_o_vol)
                 kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
                 kadj = np.dot(np.dot(kadj,uni),uni)
                 lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj)[0][0]
                 lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
-                kadj = kadj*(lamb_w_adj + lamb_o_adj)
-                keq = self.kequiv(kvol, kadj)
-                keq = keq*(np.dot(self.A, uni)/(np.dot(self.h, uni)))
+                lbt_adj = lamb_w_adj + lamb_o_adj
+                #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                if vector_flux[volume][unit] < 0:
+                    keq = kvol * lbt_vol
+                else:
+                    keq = kadj * lbt_adj
+
+                keq = keq*(np.dot(self.A, uni)/(abs(np.dot(direction, uni))))
                 temp_glob_adj.append(self.map_vols_ic[adj])
                 temp_k.append(-keq)
                 soma = soma + keq
@@ -2724,6 +2738,79 @@ class Msclassic_bif:
             global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
             lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume)[0][0]
             lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume)[0][0]
+            lbt_vol = lamb_w_vol + lamb_o_vol
+            soma = 0.0
+            temp_glob_adj = []
+            temp_k = []
+            for adj in adj_volumes:
+                #2
+                global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
+                adj_centroid = self.mesh_topo_util.get_average_position([adj])
+                direction = adj_centroid - volume_centroid
+                uni = self.unitary(direction)
+                unit = direction/np.linalg.norm(direction)
+                kvol = np.dot(np.dot(kvol,uni),uni)
+                #kvol = kvol*(lamb_w_vol + lamb_o_vol)
+                kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                kadj = np.dot(np.dot(kadj,uni),uni)
+                lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj)[0][0]
+                lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
+                lbt_adj = lamb_w_adj + lamb_o_adj
+                #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                if vector_flux[volume][unit] < 0:
+                    keq = kvol * lbt_vol
+                else:
+                    keq = kadj * lbt_adj
+
+                keq = keq*(np.dot(self.A, uni)/(abs(np.dot(direction, uni))))
+                if adj in self.wells_d:
+                    #3
+                    soma = soma + keq
+                    index = self.wells_d.index(adj)
+                    self.b[self.map_vols_ic[volume]] += self.set_p[index]*(keq)
+                #2
+                else:
+                    #3
+                    temp_glob_adj.append(self.map_vols_ic[adj])
+                    temp_k.append(-keq)
+                    soma = soma + keq
+                #2
+                kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            #1
+            temp_k.append(soma)
+            temp_glob_adj.append(self.map_vols_ic[volume])
+            self.trans_fine.InsertGlobalValues(self.map_vols_ic[volume], temp_k, temp_glob_adj)
+            if volume in self.wells_n:
+                #2
+                index = self.wells_n.index(volume)
+                if volume in self.wells_inj:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += self.set_q[index]
+                #2
+                else:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += -self.set_q[index]
+        #0
+        self.trans_fine.FillComplete()
+
+    def set_global_problem_vf_3(self):
+        """
+        transmissibilidade da malha fina excluindo os volumes com pressao prescrita
+        usando a mobilidade media
+        """
+        #0
+        std_map = Epetra.Map(len(self.all_fine_vols_ic),0,self.comm)
+        self.trans_fine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        self.b = Epetra.Vector(std_map)
+        for volume in self.all_fine_vols_ic - set(self.neigh_wells_d):
+            #1
+            volume_centroid = self.mesh_topo_util.get_average_position([volume])
+            adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+            kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
+            lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume)[0][0]
+            lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume)[0][0]
+            lbt_vol = lamb_w_vol + lamb_o_vol
             soma = 0.0
             temp_glob_adj = []
             temp_k = []
@@ -2734,14 +2821,63 @@ class Msclassic_bif:
                 direction = adj_centroid - volume_centroid
                 uni = self.unitary(direction)
                 kvol = np.dot(np.dot(kvol,uni),uni)
-                kvol = kvol*(lamb_w_vol + lamb_o_vol)
+                #kvol = kvol*(lamb_w_vol + lamb_o_vol)
                 kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
                 kadj = np.dot(np.dot(kadj,uni),uni)
                 lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj)[0][0]
                 lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
-                kadj = kadj*(lamb_w_adj + lamb_o_adj)
-                keq = self.kequiv(kvol, kadj)
-                keq = keq*(np.dot(self.A, uni)/(np.dot(self.h, uni)))
+                lbt_adj = lamb_w_adj + lamb_o_adj
+
+                #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                keq = self.kequiv(kvol, kadj)*((lbt_adj + lbt_vol)/2.0)
+                keq = keq*(np.dot(self.A, uni)/(abs(np.dot(direction, uni))))
+                temp_glob_adj.append(self.map_vols_ic[adj])
+                temp_k.append(-keq)
+                soma = soma + keq
+                kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            #1
+            temp_k.append(soma)
+            temp_glob_adj.append(self.map_vols_ic[volume])
+            self.trans_fine.InsertGlobalValues(self.map_vols_ic[volume], temp_k, temp_glob_adj)
+            if volume in self.wells_n:
+                #2
+                index = self.wells_n.index(volume)
+                if volume in self.wells_inj:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += self.set_q[index]
+                #2
+                else:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += -self.set_q[index]
+        #0
+        for volume in self.neigh_wells_d:
+            #1
+            volume_centroid = self.mesh_topo_util.get_average_position([volume])
+            adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+            kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
+            lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume)[0][0]
+            lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume)[0][0]
+            lbt_vol = lamb_w_vol + lamb_o_vol
+            soma = 0.0
+            temp_glob_adj = []
+            temp_k = []
+            for adj in adj_volumes:
+                #2
+                global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
+                adj_centroid = self.mesh_topo_util.get_average_position([adj])
+                direction = adj_centroid - volume_centroid
+                uni = self.unitary(direction)
+                kvol = np.dot(np.dot(kvol,uni),uni)
+                #kvol = kvol*(lamb_w_vol + lamb_o_vol)
+                kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                kadj = np.dot(np.dot(kadj,uni),uni)
+                lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj)[0][0]
+                lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
+                lbt_adj = lamb_o_adj + lamb_o_adj
+                #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                keq = self.kequiv(kvol, kadj)*((lbt_adj + lbt_vol)/2.0)
+                keq = keq*(np.dot(self.A, uni)/(abs(np.dot(direction, uni))))
                 if adj in self.wells_d:
                     #3
                     soma = soma + keq
@@ -2778,40 +2914,40 @@ class Msclassic_bif:
         """
 
 
-        # perm_tensor = [1, 0.0, 0.0,
-        #                 0.0, 1, 0.0,
-        #                 0.0, 0.0, 1]
-        #
-        # for volume in self.all_fine_vols:
-        #     self.mb.tag_set_data(self.perm_tag, volume, perm_tensor)
-
-        perm_tensor_1 = [1.0, 0.0, 0.0,
-                         0.0, 1.0, 0.0,
-                         0.0, 0.0, 1.0]
-
-        perm_tensor_2 = [0.5, 0.0, 0.0,
-                         0.0, 0.5, 0.0,
-                         0.0, 0.0, 0.5]
-
-        gid1 = np.array([0, 0, 0])
-        gid2 = np.array([int((self.nx - 1)/2.0), int(self.ny-1), int(self.nz-1)])
-        dif = gid2 - gid1 + np.array([1, 1, 1])
-
-        gids = []
-        for k in range(dif[2]):
-            for j in range(dif[1]):
-                for i in range(dif[0]):
-                    gid = gid1 + np.array([i, j, k])
-                    gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
-                    gids.append(gid)
-
+        perm_tensor = [1, 0.0, 0.0,
+                        0.0, 1, 0.0,
+                        0.0, 0.0, 1]
 
         for volume in self.all_fine_vols:
-            gid_vol = self.mb.tag_get_data(self.global_id_tag, volume, flat = True)[0]
-            if gid_vol in gids:
-                self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_1)
-            else:
-                self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_2)
+            self.mb.tag_set_data(self.perm_tag, volume, perm_tensor)
+
+        # perm_tensor_1 = [1.0, 0.0, 0.0,
+        #                  0.0, 1.0, 0.0,
+        #                  0.0, 0.0, 1.0]
+        #
+        # perm_tensor_2 = [0.5, 0.0, 0.0,
+        #                  0.0, 0.5, 0.0,
+        #                  0.0, 0.0, 0.5]
+        #
+        # gid1 = np.array([0, 0, 0])
+        # gid2 = np.array([int((self.nx - 1)/2.0), int(self.ny-1), int(self.nz-1)])
+        # dif = gid2 - gid1 + np.array([1, 1, 1])
+        #
+        # gids = []
+        # for k in range(dif[2]):
+        #     for j in range(dif[1]):
+        #         for i in range(dif[0]):
+        #             gid = gid1 + np.array([i, j, k])
+        #             gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #             gids.append(gid)
+        #
+        #
+        # for volume in self.all_fine_vols:
+        #     gid_vol = self.mb.tag_get_data(self.global_id_tag, volume, flat = True)[0]
+        #     if gid_vol in gids:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_1)
+        #     else:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_2)
 
 
         # for volume in self.all_fine_vols:
@@ -3271,7 +3407,8 @@ class Msclassic_bif:
         self.set_sat_in()
         #self.set_lamb()
         self.set_lamb_2()
-        self.set_global_problem_vf_2()
+        #self.set_global_problem_vf_2()
+        self.set_global_problem_vf_3()
 
 
         ####################################
