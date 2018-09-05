@@ -9,6 +9,7 @@ import os
 import shutil
 import random
 import sys
+import configparser
 
 
 class MsClassic_mono:
@@ -2040,6 +2041,7 @@ class MsClassic_mono:
         self.wells_n == lista contendo os ids globais dos volumes com vazao prescrita
         self.set_p == lista com os valores da pressao referente a self.wells_d
         self.set_q == lista com os valores da vazao referente a self.wells_n
+        adiciona o efeito da gravidade
 
         """
         wells_d = []
@@ -3042,44 +3044,45 @@ class MsClassic_mono:
         Le os dados do arquivo structured
 
         """
-        with open('structured.cfg', 'r') as arq:
-            text = arq.readlines()
+        config = configparser.ConfigParser()
+        config.read('structured.cfg')
+        StructuredMS = config['StructuredMS']
+        mesh_size = list(map(int, StructuredMS['mesh-size'].strip().replace(',', '').split()))
+        coarse_ratio = list(map(int, StructuredMS['coarse-ratio'].strip().replace(',', '').split()))
+        block_size = list(map(float, StructuredMS['block-size'].strip().replace(',', '').split()))
 
-        a = text[11].strip()
-        a = a.split("=")
-        a = a[1].strip()
-        a = a.split(",")
-        crx = int(a[0].strip())
-        cry = int(a[1].strip())
-        crz = int(a[2].strip())
+        ##### Razoes de engrossamento
+        crx = coarse_ratio[0]
+        cry = coarse_ratio[1]
+        crz = coarse_ratio[2]
 
-        a = text[12].strip()
-        a = a.split("=")
-        a = a[1].strip()
-        a = a.split(",")
-        nx = int(a[0].strip())
-        ny = int(a[1].strip())
-        nz = int(a[2].strip())
+        ##### Numero de elementos nas respectivas direcoes
+        nx = mesh_size[0]
+        ny = mesh_size[1]
+        nz = mesh_size[2]
 
-        a = text[13].strip()
-        a = a.split("=")
-        a = a[1].strip()
-        a = a.split(",")
-        hx = float(a[0].strip())
-        hy = float(a[1].strip())
-        hz = float(a[2].strip())
+        ##### Tamanho dos elementos nas respectivas direcoes
+        hx = block_size[0]
+        hy = block_size[1]
+        hz = block_size[2]
+        h = np.array([hx, hy, hz])
 
+        #### Tamanho inteiro do dominio nas respectivas direcoes
         tx = nx*hx
         ty = ny*hy
         tz = nz*hz
-        h = np.array([hx, hy, hz])
+
+
+        #### tamanho dos elementos ao quadrado
         h2 = np.array([hx**2, hy**2, hz**2])
 
+        ##### Area dos elementos nas direcoes cartesianass
         ax = hy*hz
         ay = hx*hz
         az = hx*hy
         A = np.array([ax, ay, az])
 
+        ##### Volume dos elementos
         V = hx*hy*hz
 
         self.nx = nx
@@ -3815,26 +3818,40 @@ class MsClassic_mono:
         #             gids.append(gid)
         #
         #
+        ### caixa no meio
+        # gid1 = np.array([5, 5, 5])
+        # gid2 = np.array([9, 9, 9])
+        # dif =  gid2 - gid1 + np.array([1, 1, 1])
+        # gids = []
+        # for k in range(dif[2]):
+        #     for j in range(dif[1]):
+        #         for i in range(dif[0]):
+        #             gid = gid1 + np.array([i, j, k])
+        #             gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #             gids.append(gid)
+        #
+        #
+        #
         # perm_tensor_1 = [1.0, 0.0, 0.0,
         #                 0.0, 1.0, 0.0,
         #                 0.0, 0.0, 1.0]
         #
-        # perm_tensor_2 = [0.5, 0.0, 0.0,
-        #                  0.0, 0.5, 0.0,
-        #                  0.0, 0.0, 0.5]
+        # perm_tensor_2 = [0.001, 0.0, 0.0,
+        #                  0.0, 0.001, 0.0,
+        #                  0.0, 0.0, 0.001]
         #
         #
         # k1 = 1.0
-        # k2 = 0.5
+        # k2 = 0.001
         #
         # for volume in self.all_fine_vols:
         #     gid = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
         #     if gid in gids:
-        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_1)
-        #         self.mb.tag_set_data(self.k_tag, volume, k1)
-        #     else:
         #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_2)
         #         self.mb.tag_set_data(self.k_tag, volume, k2)
+        #     else:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_1)
+        #         self.mb.tag_set_data(self.k_tag, volume, k1)
 
         # sudo docker pull padmec/elliptic:1.0
         # k3 = 100.0

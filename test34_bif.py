@@ -39,22 +39,24 @@ class Msclassic_bif:
         for collocation_point_set in self.sets:
             collocation_point = self.mb.get_entities_by_handle(collocation_point_set)[0]
             self.set_of_collocation_points_elems.add(collocation_point)
-        #self.ident_primal = remapeamento dos ids globais
+        #self.ident_primal = remapeamento dos ids globais dos volumes da malha grossa
+        self.flag_grav = self.mb.tag_get_data(self.flag_gravidade_tag, elem0, flat=True)[0] # flag da gravidade
         self.loops = self.mb.tag_get_data(self.loops_tag, elem0, flat=True)[0] # loops totais
-        self.t = 1e7 # tempo total de simulacao
-        self.mi_w = 1.0 # viscosidade da agua
-        self.mi_o = 1.25 # viscosidade do oleo
-        self.ro_w = 1.0 # densidade da agua
-        self.ro_o = 0.98 # densidade do oleo
-        self.gama_w = 1.0 #  peso especifico da agua
-        self.gama_o = 0.98 # peso especifico do oleo
+        self.t = self.mb.tag_get_data(self.t_tag, elem0, flat=True)[0] # tempo total de simulacao
+        self.mi_w = self.mb.tag_get_data(self.miw_tag, elem0, flat=True)[0] # viscosidade da agua
+        self.mi_o = self.mb.tag_get_data(self.mio_tag, elem0, flat=True)[0] # viscosidade do oleo
+        self.ro_w = self.mb.tag_get_data(self.rhow_tag, elem0, flat=True)[0] # densidade da agua
+        self.ro_o = self.mb.tag_get_data(self.rhoo_tag, elem0, flat=True)[0] # densidade do oleo
+        self.gama_w = self.mb.tag_get_data(self.gamaw_tag, elem0, flat=True)[0] #  peso especifico da agua
+        self.gama_o = self.mb.tag_get_data(self.gamao_tag, elem0, flat=True)[0] # peso especifico do oleo
         self.gama_ = self.gama_w + self.gama_o
+        self.gama = self.gama_
 
-        self.Swi = 0.2 # saturacao inicial para escoamento da agua
-        self.Swc = 0.2 # saturacao de agua conata
-        self.Sor = 0.2 # saturacao residual de oleo
-        self.nw = 2 # expoente da agua para calculo da permeabilidade relativa
-        self.no = 2 # expoente do oleo para calculo da permeabilidade relativa
+        self.nw = self.mb.tag_get_data(self.nw_tag, elem0, flat=True)[0] # expoente da agua para calculo da permeabilidade relativa
+        self.no = self.mb.tag_get_data(self.no_tag, elem0, flat=True)[0] # expoente do oleo para calculo da permeabilidade relativa
+        self.Sor = self.mb.tag_get_data(self.Sor_tag, elem0, flat=True)[0] # saturacao residual de oleo
+        self.Swc = self.mb.tag_get_data(self.Swc_tag, elem0, flat=True)[0] # saturacao de agua conata
+        self.Swi = self.mb.tag_get_data(self.Swi_tag, elem0, flat=True)[0] # saturacao inicial para escoamento da agua
 
         # Ribeiro
         self.Sw_inf = 0.1
@@ -69,11 +71,16 @@ class Msclassic_bif:
         self.no_2 = 0.9
         self.nw_2 = 1.5
 
+
+
         # self.read_perms_and_phi_spe10()
         self.set_k() # seta a permeabilidade em cada volume
         self.set_fi() # seta a porosidade em cada volume
-        self.get_wells() # obtem os gids dos volumes que sao pocos
-        self.read_perm_rel() # le o arquivo txt perm_rel.txt
+        if self.flag_grav == 1:
+            self.get_wells_gr()
+        else:
+            self.get_wells() # obtem os gids dos volumes que sao pocos
+        # self.read_perm_rel() # le o arquivo txt perm_rel.txt
         gids = self.mb.tag_get_data(self.global_id_tag, self.all_fine_vols , flat = True)
         self.map_gids_in_all_fine_vols = dict(zip(gids, self.all_fine_vols)) # mapeamento dos gids nos elementos
 
@@ -150,7 +157,6 @@ class Msclassic_bif:
             self.pasta = self.caminho5
 
         os.chdir(self.caminho1)
-
 
     def calculate_local_problem_het(self, elems, lesser_dim_meshsets, support_vals_tag):
         std_map = Epetra.Map(len(elems), 0, self.comm)
@@ -1031,13 +1037,31 @@ class Msclassic_bif:
                         "LAMB_O", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
+        self.volumes_in_primal_tag = mb.tag_get_handle(
+            "VOLUMES_IN_PRIMAL", 1, types.MB_TYPE_HANDLE,
+            types.MB_TAG_MESH, True)
+
         self.primal_id_tag = mb.tag_get_handle("PRIMAL_ID")
         self.fine_to_primal_tag = mb.tag_get_handle("FINE_TO_PRIMAL")
         self.valor_da_prescricao_tag = mb.tag_get_handle("VALOR_DA_PRESCRICAO")
         self.tipo_de_prescricao_tag = mb.tag_get_handle("TIPO_DE_PRESCRICAO")
         self.wells_tag = mb.tag_get_handle("WELLS")
         self.tipo_de_poco_tag = mb.tag_get_handle("TIPO_DE_POCO")
+
         self.loops_tag = mb.tag_get_handle('LOOPS')
+        self.flag_gravidade_tag = mb.tag_get_handle('GRAV')
+        self.t_tag = self.mb.tag_get_handle("T")
+        self.miw_tag = self.mb.tag_get_handle("MIW")
+        self.mio_tag = self.mb.tag_get_handle("MIO")
+        self.rhow_tag = self.mb.tag_get_handle("RHOW")
+        self.rhoo_tag = self.mb.tag_get_handle("RHOO")
+        self.gamaw_tag = self.mb.tag_get_handle("GAMAW")
+        self.gamao_tag = self.mb.tag_get_handle("GAMAO")
+        self.nw_tag = self.mb.tag_get_handle("NW")
+        self.no_tag = self.mb.tag_get_handle("NO")
+        self.Sor_tag = self.mb.tag_get_handle("SOR")
+        self.Swc_tag = self.mb.tag_get_handle("SWC")
+        self.Swi_tag = self.mb.tag_get_handle("SWI")
 
     def Dirichlet_problem(self):
         """
@@ -1560,6 +1584,57 @@ class Msclassic_bif:
                 wells_inj.append(well)
             else:
                 wells_prod.append(well)
+
+        self.wells_d = wells_d
+        self.wells_n = wells_n
+        self.set_p = set_p
+        self.set_q = set_q
+        self.wells_inj = wells_inj
+        self.wells_prod = wells_prod
+
+    def get_wells_gr(self):
+        """
+        obtem:
+        self.wells == os elementos que contem os pocos
+        self.wells_d == lista contendo os ids globais dos volumes com pressao prescrita
+        self.wells_n == lista contendo os ids globais dos volumes com vazao prescrita
+        self.set_p == lista com os valores da pressao referente a self.wells_d
+        self.set_q == lista com os valores da vazao referente a self.wells_n
+        adiciona o efeito da gravidade
+        """
+
+        wells_d = []
+        wells_n = []
+        set_p = []
+        set_q = []
+        wells_inj = []
+        wells_prod = []
+
+        wells_set = self.mb.tag_get_data(self.wells_tag, 0, flat=True)[0]
+        self.wells = self.mb.get_entities_by_handle(wells_set)
+        wells = self.wells
+
+        for well in wells:
+            global_id = self.mb.tag_get_data(self.global_id_tag, well, flat=True)[0]
+            valor_da_prescricao = self.mb.tag_get_data(self.valor_da_prescricao_tag, well, flat=True)[0]
+            tipo_de_prescricao = self.mb.tag_get_data(self.tipo_de_prescricao_tag, well, flat=True)[0]
+            centroid = self.mesh_topo_util.get_average_position([well])
+            #raio_do_poco = self.mb.tag_get_data(self.raio_do_poco_tag, well, flat=True)[0]
+            tipo_de_poco = self.mb.tag_get_data(self.tipo_de_poco_tag, well, flat=True)[0]
+            #tipo_de_fluido = self.mb.tag_get_data(self.tipo_de_fluido_tag, well, flat=True)[0]
+            #pwf = self.mb.tag_get_data(self.pwf_tag, well, flat=True)[0]
+            if tipo_de_prescricao == 0:
+                wells_d.append(well)
+                set_p.append(valor_da_prescricao + (self.tz - centroid[2])*self.gama)
+            else:
+                wells_n.append(well)
+                set_q.append(valor_da_prescricao)
+
+            if tipo_de_poco == 1:
+                wells_inj.append(well)
+            else:
+                wells_prod.append(well)
+
 
         self.wells_d = wells_d
         self.wells_n = wells_n
@@ -2383,40 +2458,45 @@ class Msclassic_bif:
         with open('structured.cfg', 'r') as arq:
             text = arq.readlines()
 
-        a = text[11].strip()
-        a = a.split("=")
-        a = a[1].strip()
-        a = a.split(",")
-        crx = int(a[0].strip())
-        cry = int(a[1].strip())
-        crz = int(a[2].strip())
+        config = configparser.ConfigParser()
+        config.read('structured.cfg')
+        StructuredMS = config['StructuredMS']
+        mesh_size = list(map(int, StructuredMS['mesh-size'].strip().replace(',', '').split()))
+        coarse_ratio = list(map(int, StructuredMS['coarse-ratio'].strip().replace(',', '').split()))
+        block_size = list(map(float, StructuredMS['block-size'].strip().replace(',', '').split()))
 
-        a = text[12].strip()
-        a = a.split("=")
-        a = a[1].strip()
-        a = a.split(",")
-        nx = int(a[0].strip())
-        ny = int(a[1].strip())
-        nz = int(a[2].strip())
+        ##### Razoes de engrossamento
+        crx = coarse_ratio[0]
+        cry = coarse_ratio[1]
+        crz = coarse_ratio[2]
 
-        a = text[13].strip()
-        a = a.split("=")
-        a = a[1].strip()
-        a = a.split(",")
-        hx = float(a[0].strip())
-        hy = float(a[1].strip())
-        hz = float(a[2].strip())
+        ##### Numero de elementos nas respectivas direcoes
+        nx = mesh_size[0]
+        ny = mesh_size[1]
+        nz = mesh_size[2]
 
-        tx = hx*nx
-        ty = hy*ny
-        tz = hz*nz
+        ##### Tamanho dos elementos nas respectivas direcoes
+        hx = block_size[0]
+        hy = block_size[1]
+        hz = block_size[2]
         h = np.array([hx, hy, hz])
+
+        #### Tamanho inteiro do dominio nas respectivas direcoes
+        tx = nx*hx
+        ty = ny*hy
+        tz = nz*hz
+
+        #### tamanho dos elementos ao quadrado
         h2 = np.array([hx**2, hy**2, hz**2])
 
+        ##### Area dos elementos nas direcoes cartesianass
         ax = hy*hz
         ay = hx*hz
         az = hx*hy
-        a = np.array([ax, ay, az])
+        A = np.array([ax, ay, az])
+
+        ##### Volume dos elementos
+        V = hx*hy*hz
 
         hmin = min(hx, hy, hz)
         V = hx*hy*hz
@@ -2445,8 +2525,7 @@ class Msclassic_bif:
 
     def set_fi(self):
         fi = 0.3
-        for volume in self.all_fine_vols:
-            self.mb.tag_set_data(self.fi_tag, volume, fi)
+        self.mb.tag_set_data(self.fi_tag, self.all_fine_vols, np.repeat(fi, len(self.all_fine_vols)))
 
     def set_global_problem(self):
 
@@ -2705,10 +2784,11 @@ class Msclassic_bif:
                 lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
                 lbt_adj = lamb_w_adj + lamb_o_adj
                 #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                keq = self.kequiv(kvol, kadj)
                 if vector_flux[volume][unit] < 0:
-                    keq = kvol * lbt_vol
+                    keq = keq * lbt_vol
                 else:
-                    keq = kadj * lbt_adj
+                    keq = keq * lbt_adj
 
                 keq = keq*(np.dot(self.A, uni)/(abs(np.dot(direction, uni))))
                 temp_glob_adj.append(self.map_vols_ic[adj])
@@ -2757,10 +2837,11 @@ class Msclassic_bif:
                 lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
                 lbt_adj = lamb_w_adj + lamb_o_adj
                 #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                keq = self.kequiv(kvol, kadj)
                 if vector_flux[volume][unit] < 0:
-                    keq = kvol * lbt_vol
+                    keq = keq * lbt_vol
                 else:
-                    keq = kadj * lbt_adj
+                    keq = keq * lbt_adj
 
                 keq = keq*(np.dot(self.A, uni)/(abs(np.dot(direction, uni))))
                 if adj in self.wells_d:
@@ -3142,8 +3223,7 @@ class Msclassic_bif:
             fine_elems_in_primal = self.mb.get_entities_by_handle(primal)
             volumes_in_interface, volumes_in_primal = self.get_volumes_in_interfaces(
             fine_elems_in_primal, primal_id, flag = 1)
-            for volume in volumes_in_primal:
-                self.mb.add_entities(volumes_in_primal_set, [volume])
+            self.mb.add_entities(volumes_in_primal_set, volumes_in_primal)
         self.mb.tag_set_data(self.volumes_in_primal_tag, 0, volumes_in_primal_set)
 
         # volumes_in_primal_set = self.mb.tag_get_data(self.volumes_in_primal_tag, 0, flat=True)[0]

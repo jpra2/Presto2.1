@@ -1,11 +1,11 @@
-from test34 import MsClassic_mono
+from test34_bif import Msclassic_bif
 import time
 import numpy as np
 from PyTrilinos import Epetra, AztecOO, EpetraExt
 
-class gravidade(MsClassic_mono):
-    def __init__(self, ind = False):
-        super().__init__(ind = ind)
+class gravidade_bif(Msclassic_bif):
+    def __init__(self):
+        super().__init__()
         self.run_grav()
 
     def create_flux_vector_pf_gr(self):
@@ -105,6 +105,222 @@ class gravidade(MsClassic_mono):
 
         tf = time.time()
         # import pdb; pdb.set_trace()
+        return store_flux_pf
+
+    def create_flux_vector_pf_gr_bif_1(self):
+        """
+        cria um vetor para armazenar os fluxos em cada volume da malha fina
+        os fluxos sao armazenados de acordo com a direcao sendo 6 direcoes
+        para cada volume
+        adiciona o efeito da gravidade
+        """
+        # volumes_in_primal_set = self.mb.tag_get_data(self.volumes_in_primal_tag, 0, flat=True)[0]
+        # volumes_in_primal_set = self.mb.get_entities_by_handle(volumes_in_primal_set)
+        lim = 1e-4
+        self.dfdsmax = 0
+        self.fimin = 10
+        self.qmax = 0
+        self.store_velocity_pf = {}
+        store_flux_pf = {}
+        for primal in self.primals:
+            #1
+            primal_id1 = self.mb.tag_get_data(self.primal_id_tag, primal, flat=True)[0]
+            primal_id = self.ident_primal[primal_id1]
+            fine_elems_in_primal = self.mb.get_entities_by_handle(primal)
+            for volume in fine_elems_in_primal:
+                #2
+                list_keq = []
+                list_p = []
+                list_gid = []
+                list_keq3 = []
+                list_gidsadj = []
+                list_qw = []
+                qw3 = []
+                qw = 0
+                flux = {}
+                velocity = {}
+                fi = self.mb.tag_get_data(self.fi_tag, volume, flat=True)[0]
+                if fi < self.fimin:
+                    self.fimin = fi
+                kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+                lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume, flat=True)[0]
+                lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume, flat=True)[0]
+                lbt_vol = lamb_w_vol + lamb_o_vol
+                fw_vol = self.mb.tag_get_data(self.fw_tag, volume, flat=True)[0]
+                sat_vol = self.mb.tag_get_data(self.sat_tag, volume, flat=True)[0]
+                centroid_volume = self.mesh_topo_util.get_average_position([volume])
+                z_vol = self.tz - centroid_volume[2]
+                adjs_vol = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+                gid_vol = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
+                pvol = self.mb.tag_get_data(self.pf_tag, volume, flat=True)[0]
+                for adj in adjs_vol:
+                    #3
+                    gid_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
+                    sat_adj = self.mb.tag_get_data(self.sat_tag, adj, flat=True)[0]
+                    padj = self.mb.tag_get_data(self.pf_tag, adj, flat=True)[0]
+                    kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                    centroid_adj = self.mesh_topo_util.get_average_position([adj])
+                    z_adj = self.tz - centroid_adj[2]
+                    direction = centroid_adj - centroid_volume
+                    unit = direction/np.linalg.norm(direction)
+                    #unit = vetor unitario na direcao de direction
+                    uni = self.unitary(direction)
+                    # uni = valor positivo do vetor unitario
+                    kvol = np.dot(np.dot(kvol,uni),uni)
+                    kadj = np.dot(np.dot(kadj,uni),uni)
+                    lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj, flat=True)[0]
+                    lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj, flat=True)[0]
+                    lbt_adj = lamb_w_adj + lamb_o_adj
+                    fw_adj = self.mb.tag_get_data(self.fw_tag, adj, flat=True)[0]
+
+                    keq3 = (kvol*lamb_w_vol + kadj*lamb_w_adj)/2.0
+
+                    # kvol = kvol*(lamb_w_vol + lamb_o_vol)
+                    # kadj = kadj*(lamb_w_adj + lamb_o_adj)
+
+                    keq = self.kequiv(kvol, kadj)*((lbt_adj + lbt_vol)/2.0)
+                    grad_p = (padj - pvol)/float(abs(np.dot(direction, uni)))
+                    grad_z = (z_adj - z_vol)/float(abs(np.dot(direction, uni)))
+                    q = ((grad_p) - grad_z*self.gama)*(np.dot(self.A, uni))*keq
+
+                    list_keq.append(keq)
+                    list_p.append(padj)
+                    list_gid.append(gid_adj)
+
+                    keq2 = keq
+
+                    qw += q*(fw_adj + fw_vol)/2.0
+
+                    #keq = keq*(np.dot(self.A, uni))
+                    #pvol2 = self.mb.tag_get_data(self.pms_tag, volume, flat=True)[0]
+                    #padj2 = self.mb.tag_get_data(self.pms_tag, adj, flat=True)[0]
+
+                    #grad_p2 = (padj2 - pvol2)/float(abs(np.dot(direction, uni)))
+                    #q = (grad_p)*keq
+                    #qw3.append(grad_p*keq3*(np.dot(self.A, uni)))
+                    # if grad_p < 0:
+                    #     #4
+                    #     fw = fw_vol
+                    #     qw += (fw*grad_p*kvol*(np.dot(self.A, uni)))
+                    #     list_qw.append(fw*grad_p*kvol*(np.dot(self.A, uni)))
+                    #
+                    # else:
+                    #     fw = fw_adj
+                    #     qw += (fw*grad_p*kadj*(np.dot(self.A, uni)))
+                    #     list_qw.append(fw*grad_p*kadj*(np.dot(self.A, uni)))
+
+
+                    # if gid_adj > gid_vol:
+                    #     v = -(grad_p)*keq2
+                    # else:
+                    #     v = (grad_p)*keq2
+
+                    flux[tuple(unit)] = q
+                    #velocity[tuple(unit)] = v
+                    kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+                    if abs(sat_adj - sat_vol) < lim or abs(fw_adj -fw_vol) < lim:
+                        continue
+                    dfds = abs((fw_adj - fw_vol)/(sat_adj - sat_vol))
+                    # print('aqui')
+                    # print(gid_vol)
+                    # print(gid_adj)
+                    # print(fw_adj - fw_vol)
+                    # print(sat_adj - sat_vol)
+                    # print(dfds)
+                    if dfds > self.dfdsmax:
+                        self.dfdsmax = dfds
+
+                #2
+                # list_keq.append(-sum(list_keq))
+                # list_p.append(pvol)
+                # list_gid.append(gid_vol)
+                #
+                # list_keq = np.array(list_keq)
+                # list_p = np.array(list_p)
+                # resultado = sum(list_keq*list_p)
+
+                # print(gid_vol)
+                # print(velocity)
+                # print('\n')
+                # import pdb; pdb.set_trace()
+                #self.store_velocity_pf[volume] = velocity
+                store_flux_pf[volume] = flux
+                flt = sum(flux.values())
+                print('gid')
+                print(gid_vol)
+                print('flux')
+                print(flt)
+                print('\n')
+                import pdb; pdb.set_trace()
+                self.mb.tag_set_data(self.flux_fine_pf_tag, volume, flt)
+
+                if abs(sum(flux.values())) > lim and volume not in self.wells:
+                    print('nao esta dando conservativo na malha fina')
+                    print(gid_vol)
+                    print(sum(flux.values()))
+                    import pdb; pdb.set_trace()
+
+                qmax = max(list(map(abs, flux.values())))
+                if qmax > self.qmax:
+                    self.qmax = qmax
+                if volume in self.wells_prod:
+                    qw_out = sum(flux.values())*fw_vol
+                    #qw3.append(-qw_out)
+                    qo_out = sum(flux.values())*(1 - fw_vol)
+                    self.prod_o.append(qo_out)
+                    self.prod_w.append(qw_out)
+                    qw = qw - qw_out
+
+                if abs(qw) < lim and qw < 0.0:
+                    qw = 0.0
+
+                elif qw < 0 and volume not in self.wells_inj:
+                    print('gid')
+                    print(gid_vol)
+                    print('qw < 0')
+                    print(qw)
+                    import pdb; pdb.set_trace()
+
+                else:
+                    pass
+
+
+                # if (qw < 0.0 or sum(qw3) < 0.0) and volume not in self.wells_inj:
+                #     print('qw3')
+                #     print(sum(qw3))
+                #     print('qw')
+                #     print(qw)
+                #     import pdb; pdb.set_trace()
+                self.mb.tag_set_data(self.flux_w_tag, volume, qw)
+
+                # print(self.dfdsmax)
+                # print(sum(flux.values()))
+                # print(sum(qw))
+                # print(sum(qw3))
+                # print('\n')
+
+        soma_inj = []
+        soma_prod = []
+        soma2 = 0
+        with open('fluxo_malha_fina_bif_gr{0}.txt'.format(self.loop), 'w') as arq:
+            for volume in self.wells:
+                gid = self.mb.tag_get_data(self.global_id_tag, volume, flat = True)[0]
+                values = self.store_flux_pf[volume].values()
+                arq.write('gid:{0} , fluxo:{1}\n'.format(gid, sum(values)))
+
+                # print('gid:{0}'.format(gid))
+                # print('valor:{0}'.format(sum(values)))
+                if volume in self.wells_inj:
+                    soma_inj.append(sum(values))
+                else:
+                    soma_prod.append(sum(values))
+                # print('\n')
+                soma2 += sum(values)
+            arq.write('\n')
+            arq.write('soma_inj:{0}\n'.format(sum(soma_inj)))
+            arq.write('soma_prod:{0}\n'.format(sum(soma_prod)))
+            arq.write('tempo:{0}'.format(self.tempo))
+
         return store_flux_pf
 
     def create_flux_vector_pms_gr(self):
@@ -414,16 +630,22 @@ class gravidade(MsClassic_mono):
         """
 
         # Solucao direta
-        self.set_contorno()
+        self.prod_w = []
+        self.prod_o = []
+        t0 = time.time()
         self.set_volumes_in_primal()
-        self.set_global_problem_gr_vf_3()
+        self.set_sat_in()
+        self.set_lamb_2()
+        self.set_global_problem_vf_3_gr1_bif()
         self.Pf = self.solve_linear_problem(self.trans_fine, self.b, len(self.all_fine_vols_ic))
         self.organize_Pf()
         del self.Pf
         self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.asarray(self.Pf_all))
         del self.Pf_all
-        self.store_flux_pf_gr = self.create_flux_vector_pf_gr()
+        self.store_flux_pf_gr_bif = self.create_flux_vector_pf_gr_bif_1()
 
+        """
+        ################################################################
         # Solucao Multiescala
         self.calculate_restriction_op_2()
         self.calculate_prolongation_op_het()
@@ -449,6 +671,8 @@ class gravidade(MsClassic_mono):
         self.test_conservation_coarse_gr()
         # self.Neuman_problem_6_gr()
         # self.store_flux_pms_gr = self.create_flux_vector_pms_gr()
+        ####################################################################
+        """
 
 
 
@@ -457,7 +681,156 @@ class gravidade(MsClassic_mono):
 
 
         print('acaboooou')
-        self.mb.write_file('new_out_mono.vtk')
+        self.mb.write_file('new_out_bif_gr.vtk')
+
+    def set_global_problem_vf_3_gr1_bif(self):
+        """
+        transmissibilidade da malha fina excluindo os volumes com pressao prescrita
+        usando a mobilidade media
+        adiciona o efeito da gravidade
+        """
+        #0
+        std_map = Epetra.Map(len(self.all_fine_vols_ic),0,self.comm)
+        self.trans_fine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        self.b = Epetra.Vector(std_map)
+        for volume in self.all_fine_vols_ic - set(self.neigh_wells_d):
+            #1
+            soma = 0.0
+            soma2 = 0.0
+            soma3 = 0.0
+            volume_centroid = self.mesh_topo_util.get_average_position([volume])
+            adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+            kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
+            lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume)[0][0]
+            lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume)[0][0]
+            lbt_vol = lamb_w_vol + lamb_o_vol
+            z_vol = self.tz - volume_centroid[2]
+            soma = 0.0
+            temp_glob_adj = []
+            temp_k = []
+            flux_gr = []
+            for adj in adj_volumes:
+                #2
+                global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
+                adj_centroid = self.mesh_topo_util.get_average_position([adj])
+                z_adj = self.tz - adj_centroid[2]
+                altura = adj_centroid[2]
+                direction = adj_centroid - volume_centroid
+                uni = self.unitary(direction)
+                kvol = np.dot(np.dot(kvol,uni),uni)
+                #kvol = kvol*(lamb_w_vol + lamb_o_vol)
+                kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                kadj = np.dot(np.dot(kadj,uni),uni)
+                lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj)[0][0]
+                lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
+                lbt_adj = lamb_w_adj + lamb_o_adj
+
+                #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                keq = self.kequiv(kvol, kadj)*((lbt_adj + lbt_vol)/2.0)
+                keq = keq*(np.dot(self.A, uni)/float(abs(np.dot(direction, uni))))
+                grad_z = (z_adj - z_vol)
+                q_grad_z = grad_z*self.gama*keq
+                flux_gr.append(q_grad_z)
+
+                temp_glob_adj.append(self.map_vols_ic[adj])
+                temp_k.append(-keq)
+                kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            #1
+            soma2 = -sum(flux_gr)
+            temp_k.append(-sum(temp_k))
+            temp_glob_adj.append(self.map_vols_ic[volume])
+            self.trans_fine.InsertGlobalValues(self.map_vols_ic[volume], temp_k, temp_glob_adj)
+            if volume in self.wells_n:
+                #2
+                index = self.wells_n.index(volume)
+                # tipo_de_poco = self.mb.tag_get_data(self.tipo_de_poco_tag, volume)
+                if volume in  self.wells_inj:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += self.set_q[index] + soma2
+                #2
+                else:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += -self.set_q[index] + soma2
+            #1
+            else:
+                #2
+                self.b[self.map_vols_ic[volume]] += soma2
+        #0
+        for volume in self.neigh_wells_d:
+            #1
+            soma2 = 0.0
+            soma3 = 0.0
+            volume_centroid = self.mesh_topo_util.get_average_position([volume])
+            z_vol = self.tz - volume_centroid[2]
+            adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+            kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
+            lamb_w_vol = self.mb.tag_get_data(self.lamb_w_tag, volume)[0][0]
+            lamb_o_vol = self.mb.tag_get_data(self.lamb_o_tag, volume)[0][0]
+            lbt_vol = lamb_w_vol + lamb_o_vol
+            soma = 0.0
+            temp_glob_adj = []
+            temp_k = []
+            flux_gr = []
+            for adj in adj_volumes:
+                #2
+                global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
+                adj_centroid = self.mesh_topo_util.get_average_position([adj])
+                z_adj = self.tz - adj_centroid[2]
+                altura = adj_centroid[2]
+                direction = adj_centroid - volume_centroid
+                uni = self.unitary(direction)
+                z = uni[2]
+                kvol = np.dot(np.dot(kvol,uni),uni)
+                #kvol = kvol*(lamb_w_vol + lamb_o_vol)
+                kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                kadj = np.dot(np.dot(kadj,uni),uni)
+                lamb_w_adj = self.mb.tag_get_data(self.lamb_w_tag, adj)[0][0]
+                lamb_o_adj = self.mb.tag_get_data(self.lamb_o_tag, adj)[0][0]
+                lbt_adj = lamb_o_adj + lamb_o_adj
+                #kadj = kadj*(lamb_w_adj + lamb_o_adj)
+                keq = self.kequiv(kvol, kadj)*((lbt_adj + lbt_vol)/2.0)
+                keq = keq*(np.dot(self.A, uni)/(abs(np.dot(direction, uni))))
+                grad_z = (z_adj - z_vol)
+                q_grad_z = grad_z*self.gama*keq
+                flux_gr.append(q_grad_z)
+                #2
+                if adj in self.wells_d:
+                    #3
+                    soma = soma + keq
+                    index = self.wells_d.index(adj)
+                    self.b[self.map_vols_ic[volume]] += self.set_p[index]*(keq)
+                #2
+                else:
+                    #3
+                    temp_glob_adj.append(self.map_vols_ic[adj])
+                    temp_k.append(-keq)
+                    soma = soma + keq
+                #2
+                kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            #1
+            soma2 = -sum(flux_gr)
+            temp_k.append(soma)
+            temp_glob_adj.append(self.map_vols_ic[volume])
+            self.trans_fine.InsertGlobalValues(self.map_vols_ic[volume], temp_k, temp_glob_adj)
+            if volume in self.wells_n:
+                #2
+                index = self.wells_n.index(volume)
+                # tipo_de_poco = self.mb.tag_get_data(self.tipo_de_poco_tag, volume)
+                if volume in self.wells_inj:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += self.set_q[index] + soma2
+                #2
+                else:
+                    #3
+                    self.b[self.map_vols_ic[volume]] += -self.set_q[index] + soma2
+            #1
+            else:
+                #2
+                self.b[self.map_vols_ic[volume]] += soma2
+        #0
+        self.trans_fine.FillComplete()
 
     def test_conservation_coarse_gr(self):
         """
@@ -520,4 +893,4 @@ class gravidade(MsClassic_mono):
             arq.write('\n')
             arq.write('sum Qc:{0}'.format(sum(Qc2)))
 
-sim_grav_mono = gravidade(ind = True)
+sim_grav_bif = gravidade_bif()
