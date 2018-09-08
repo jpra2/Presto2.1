@@ -31,6 +31,7 @@ class StructuredMultiscaleMesh:
 
         self.primals = {}  # Mapping from tuples (idx, idy, idz) to Meshsets
         self.primals_faces = {}
+        self.all_faces_primals = {}
         self.primal_ids = []
 
         self.primal_centroid_ijk = {}
@@ -242,6 +243,10 @@ class StructuredMultiscaleMesh:
 
         self.faces_primal_id_tag = self.mb.tag_get_handle(
             "PRIMAL_FACES", 1, types.MB_TYPE_INTEGER,
+            types.MB_TAG_SPARSE, True)
+
+        self.all_faces_primal_id_tag = self.mb.tag_get_handle(
+            "PRIMAL_ALL_FACES", 1, types.MB_TYPE_INTEGER,
             types.MB_TAG_SPARSE, True)
 
     def _create_hexa(self, i, j, k):
@@ -1008,6 +1013,7 @@ class StructuredMultiscaleMesh:
         volumes_in_primal_set = self.mb.get_entities_by_handle(volumes_in_primal_set)
         for primal in primals:
             #1
+            set_faces_primal = set()
             primal_id = self.mb.tag_get_data(self.primal_id_tag, primal, flat=True)[0]
             fine_elems_in_primal = self.mb.get_entities_by_handle(primal)
             volumes_in_primal = set(fine_elems_in_primal) & set(volumes_in_primal_set)
@@ -1023,6 +1029,7 @@ class StructuredMultiscaleMesh:
                         faces_volume = set(self.mb.get_adjacencies(elem, 2))
                         faces_adj = set(self.mb.get_adjacencies(adj, 2))
                         intersect = list(faces_volume & faces_adj)[0]
+                        set_faces_primal.add(intersect)
                         try:
                             #5
                             faces = self.primals_faces[primal_id]
@@ -1033,7 +1040,46 @@ class StructuredMultiscaleMesh:
                             faces = self.mb.create_meshset()
                             self.primals_faces[primal_id] = faces
                             self.mb.add_entities(faces, [intersect])
-        #0
-        for primal_id, faces in self.primals_faces.items():
             #1
+            for elem in fine_elems_in_primal:
+                fine_faces = self.mb.get_adjacencies(elem, 2)
+                try:
+                    #5
+                    faces = self.all_faces_primals[primal_id]
+                    self.mb.add_entities(faces, fine_faces)
+                #4
+                except KeyError:
+                    #5
+                    faces = self.mb.create_meshset()
+                    self.all_faces_primals[primal_id] = faces
+                    self.mb.add_entities(faces, fine_faces)
+
+
+        #0
+        for i, j in zip(self.primals_faces.items(), self.all_faces_primals.items()):
+            primal_id = i[0]
+            faces = i[1]
+            all_faces = j[1]
             self.mb.tag_set_data(self.faces_primal_id_tag, faces, primal_id)
+            self.mb.tag_set_data(self.all_faces_primal_id_tag, all_faces, primal_id)
+
+        #
+        # for primal_id, faces in self.primals_faces.items():
+        #     #1
+        #     self.mb.tag_set_data(self.faces_primal_id_tag, faces, primal_id)
+        # #0
+        # for primal_id, all_faces in self.all_faces_primals.items():
+        #     #1
+        #     self.mb.tag_set_data(self.all_faces_primal_id_tag, all_faces, primal_id)
+
+        # all_faces_primals = self.mb.get_entities_by_type_and_tag(
+        #     root_set, types.MBENTITYSET, np.array([self.all_faces_primal_id_tag]),
+        #     np.array([None]))
+        #
+        # for all_faces in all_faces_primals:
+        #     elems = self.mb.get_entities_by_handle(all_faces)
+        #     for face in elems:
+        #         vols = self.mb.get_adjacencies(face, 3)
+        #         gids = self.mb.tag_get_data(self.gid_tag, vols, flat=True)
+        #         print(gids)
+        #         import pdb; pdb.set_trace()

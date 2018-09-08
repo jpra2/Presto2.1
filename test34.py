@@ -1879,6 +1879,7 @@ class MsClassic_mono:
         self.atualizar_tag = mb.tag_get_handle("ATUALIZAR")
         self.primal_id_tag = mb.tag_get_handle("PRIMAL_ID")
         self.faces_primal_id_tag = mb.tag_get_handle("PRIMAL_FACES")
+        self.all_faces_primal_id_tag = mb.tag_get_handle("PRIMAL_ALL_FACES")
         self.fine_to_primal_tag = mb.tag_get_handle("FINE_TO_PRIMAL")
         self.valor_da_prescricao_tag = mb.tag_get_handle("VALOR_DA_PRESCRICAO")
         self.raio_do_poco_tag = mb.tag_get_handle("RAIO_DO_POCO")
