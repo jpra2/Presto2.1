@@ -683,6 +683,9 @@ class gravidade_bif(Msclassic_bif):
         print('acaboooou')
         self.mb.write_file('new_out_bif_gr.vtk')
 
+        
+        shutil.copytree(self.caminho1, self.pasta)
+
     def set_global_problem_vf_3_gr1_bif(self):
         """
         transmissibilidade da malha fina excluindo os volumes com pressao prescrita

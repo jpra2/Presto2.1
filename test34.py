@@ -17,7 +17,7 @@ class MsClassic_mono:
         """
         ind = True quando se quer excluir da conta os volumes com pressao prescrita
         """
-
+        # import pdb; pdb.set_trace()
         self.read_structured()
         self.comm = Epetra.PyComm()
         self.mb = core.Core()
@@ -26,9 +26,15 @@ class MsClassic_mono:
         self.mesh_topo_util = topo_util.MeshTopoUtil(self.mb)
         self.create_tags(self.mb)
         self.all_fine_vols = self.mb.get_entities_by_dimension(self.root_set, 3)
+
         self.primals = self.mb.get_entities_by_type_and_tag(
             self.root_set, types.MBENTITYSET, np.array([self.primal_id_tag]),
             np.array([None]))
+
+        self.faces_primals = self.mb.get_entities_by_type_and_tag(
+            self.root_set, types.MBENTITYSET, np.array([self.faces_primal_id_tag]),
+            np.array([None]))
+
         self.ident_primal = []
         for primal in self.primals:
             primal_id = self.mb.tag_get_data(self.primal_id_tag, primal, flat=True)[0]
@@ -62,7 +68,6 @@ class MsClassic_mono:
 
         # self.set_volumes_in_interface()
 
-
         if ind == False:
             self.map_all_fine_vols = dict(zip(self.all_fine_vols, gids))
             self.calculate_restriction_op()
@@ -90,6 +95,8 @@ class MsClassic_mono:
             self.nf_ic = len(self.all_fine_vols_ic)
 
             # self.run_2()
+
+        print('saiu')
 
     funcoes = [
        lambda x: (x/np.linalg.norm(x))*(x/np.linalg.norm(x)), # unitario positivo na direcao de x
@@ -1857,10 +1864,6 @@ class MsClassic_mono:
                         "PERM", 9, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
-        self.volumes_in_primal_tag = mb.tag_get_handle(
-            "VOLUMES_IN_PRIMAL", 1, types.MB_TYPE_HANDLE,
-            types.MB_TAG_MESH, True)
-
         self.volumes_in_interface_tag = mb.tag_get_handle(
             "VOLUMES_IN_INTERFACE", 1, types.MB_TYPE_HANDLE,
             types.MB_TAG_MESH, True)
@@ -1875,6 +1878,7 @@ class MsClassic_mono:
 
         self.atualizar_tag = mb.tag_get_handle("ATUALIZAR")
         self.primal_id_tag = mb.tag_get_handle("PRIMAL_ID")
+        self.faces_primal_id_tag = mb.tag_get_handle("PRIMAL_FACES")
         self.fine_to_primal_tag = mb.tag_get_handle("FINE_TO_PRIMAL")
         self.valor_da_prescricao_tag = mb.tag_get_handle("VALOR_DA_PRESCRICAO")
         self.raio_do_poco_tag = mb.tag_get_handle("RAIO_DO_POCO")
@@ -1889,6 +1893,7 @@ class MsClassic_mono:
         self.gama_tag = mb.tag_get_handle("GAMA")
         self.rho_tag = mb.tag_get_handle("RHO")
         self.mi_tag = mb.tag_get_handle("MI")
+        self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
 
     def erro(self):
         for volume in self.all_fine_vols:

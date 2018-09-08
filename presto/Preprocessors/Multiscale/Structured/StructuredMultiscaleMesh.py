@@ -30,6 +30,7 @@ class StructuredMultiscaleMesh:
         self.elems = []  # List containing MOAB volume entities
 
         self.primals = {}  # Mapping from tuples (idx, idy, idz) to Meshsets
+        self.primals_faces = {}
         self.primal_ids = []
 
         self.primal_centroid_ijk = {}
@@ -42,6 +43,7 @@ class StructuredMultiscaleMesh:
 
     def set_moab(self, moab):
         self.mb = moab
+        self.mesh_topo_util = topo_util.MeshTopoUtil(self.mb)
 
     def calculate_primal_ids(self):
         for dim in range(0, 3):
@@ -225,6 +227,22 @@ class StructuredMultiscaleMesh:
 
         self.pwf_tag = self.mb.tag_get_handle(
             "PWF", 1, types.MB_TYPE_DOUBLE, types.MB_TAG_SPARSE, True)
+
+        self.all_faces_tag = self.mb.tag_get_handle(
+            "ALL_FACES", 1, types.MB_TYPE_HANDLE,
+            types.MB_TAG_MESH, True)
+
+        self.all_faces_boundary_tag = self.mb.tag_get_handle(
+            "ALL_FACES_BOUNDARY", 1, types.MB_TYPE_HANDLE,
+            types.MB_TAG_MESH, True)
+
+        self.volumes_in_primal_tag = self.mb.tag_get_handle(
+            "VOLUMES_IN_PRIMAL", 1, types.MB_TYPE_HANDLE,
+            types.MB_TAG_MESH, True)
+
+        self.faces_primal_id_tag = self.mb.tag_get_handle(
+            "PRIMAL_FACES", 1, types.MB_TYPE_INTEGER,
+            types.MB_TAG_SPARSE, True)
 
     def _create_hexa(self, i, j, k):
         # TODO: Refactor this
@@ -886,3 +904,136 @@ class StructuredMultiscaleMesh:
             self.mb.tag_set_data(self.Swi_tag, elem, self.prop['Swi'])
             self.mb.tag_set_data(self.t_tag, elem, self.prop['t'])
             self.mb.tag_set_data(self.loops_tag, elem, self.prop['loops'])
+
+    def get_faces(self):
+        """
+        cria os meshsets
+        all_faces_set: todas as faces do dominio
+        all_faces_boundary_set: todas as faces no contorno
+        """
+        all_fine_vols = self.mb.get_root_set()
+        all_fine_vols = self.mb.get_entities_by_dimension(all_fine_vols, 3)
+
+        all_faces_set = self.mb.create_meshset()
+        all_faces_boundary_set = self.mb.create_meshset()
+        set_faces = set()
+
+        for elem in all_fine_vols:
+            faces = self.mb.get_adjacencies(elem, 2, True)
+            self.mb.add_entities(all_faces_set, faces)
+            for face in set(faces) - set_faces:
+                size = len(self.mb.get_adjacencies(face, 3))
+                if size < 2:
+                    self.mb.add_entities(all_faces_boundary_set, [face])
+                else:
+                    pass
+            set_faces.add(faces)
+
+        self.mb.tag_set_data(self.all_faces_tag, 0, all_faces_set)
+        self.mb.tag_set_data(self.all_faces_boundary_tag, 0, all_faces_boundary_set)
+
+    def get_volumes_in_interfaces(self, fine_elems_in_primal, primal_id, **options):
+
+        """
+        obtem uma lista com os elementos dos primais adjacentes que estao na interface do primal corrente
+        (primal_id) (volumes_in_interface)
+
+        se flag == 1 alem dos volumes na interface dos primais adjacentes (volumes_in_interface)
+        retorna tambem os volumes no primal que estao na interface (volumes_in_primal)
+
+        se flag == 2 retorna apenas os volumes do primal corrente que estao na interface (volumes_in_primal)
+
+        """
+        #0
+        volumes_in_primal = []
+        volumes_in_interface = []
+
+        for volume in fine_elems_in_primal:
+            #1
+            global_volume = self.mb.tag_get_data(self.gid_tag, volume, flat=True)[0]
+            adjs_volume = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+            for adj in adjs_volume:
+                #2
+                global_adj = self.mb.tag_get_data(self.gid_tag, adj, flat=True)[0]
+                fin_prim = self.mb.tag_get_data(self.fine_to_primal_tag, adj, flat=True)
+                primal_adj = self.mb.tag_get_data(self.primal_id_tag, int(fin_prim), flat=True)[0]
+                if primal_adj != primal_id:
+                    #3
+                    volumes_in_interface.append(adj)
+                    volumes_in_primal.append(volume)
+        #0
+        volumes_in_primal = list(set(volumes_in_primal))
+        if options.get("flag") == 1:
+            #1
+            return volumes_in_interface, volumes_in_primal
+        #0
+        elif options.get("flag") == 2:
+            #1
+            return volumes_in_primal
+        #0
+        else:
+            #1
+            return volumes_in_interface
+
+
+    def set_volumes_in_primal(self):
+        """
+        cria um meshset com os volumes dentro dos primais que estao na interface
+        """
+
+        root_set = self.mb.get_root_set()
+        volumes_in_primal_set = self.mb.create_meshset()
+        primals = self.mb.get_entities_by_type_and_tag(
+            root_set, types.MBENTITYSET, np.array([self.primal_id_tag]),
+            np.array([None]))
+
+        for primal in primals:
+            primal_id = self.mb.tag_get_data(self.primal_id_tag, primal, flat=True)[0]
+            fine_elems_in_primal = self.mb.get_entities_by_handle(primal)
+            volumes_in_primal = self.get_volumes_in_interfaces(
+            fine_elems_in_primal, primal_id, flag = 2)
+            self.mb.add_entities(volumes_in_primal_set, volumes_in_primal)
+        self.mb.tag_set_data(self.volumes_in_primal_tag, 0, volumes_in_primal_set)
+
+    def create_interfaces_primals(self):
+        """
+        cria meshsets que contem as faces dos volumes primais
+        """
+        #0
+        root_set = self.mb.get_root_set()
+        primals = self.mb.get_entities_by_type_and_tag(
+            root_set, types.MBENTITYSET, np.array([self.primal_id_tag]),
+            np.array([None]))
+        volumes_in_primal_set = self.mb.tag_get_data(self.volumes_in_primal_tag, 0, flat=True)[0]
+        volumes_in_primal_set = self.mb.get_entities_by_handle(volumes_in_primal_set)
+        for primal in primals:
+            #1
+            primal_id = self.mb.tag_get_data(self.primal_id_tag, primal, flat=True)[0]
+            fine_elems_in_primal = self.mb.get_entities_by_handle(primal)
+            volumes_in_primal = set(fine_elems_in_primal) & set(volumes_in_primal_set)
+            for elem in volumes_in_primal:
+                #2
+                adjs = self.mesh_topo_util.get_bridge_adjacencies(elem, 2, 3)
+                for adj in adjs:
+                    #3
+                    fin_prim = self.mb.tag_get_data(self.fine_to_primal_tag, adj, flat=True)
+                    primal_adj = self.mb.tag_get_data(self.primal_id_tag, int(fin_prim), flat=True)[0]
+                    if primal_adj != primal_id:
+                        #4
+                        faces_volume = set(self.mb.get_adjacencies(elem, 2))
+                        faces_adj = set(self.mb.get_adjacencies(adj, 2))
+                        intersect = list(faces_volume & faces_adj)[0]
+                        try:
+                            #5
+                            faces = self.primals_faces[primal_id]
+                            self.mb.add_entities(faces, [intersect])
+                        #4
+                        except KeyError:
+                            #5
+                            faces = self.mb.create_meshset()
+                            self.primals_faces[primal_id] = faces
+                            self.mb.add_entities(faces, [intersect])
+        #0
+        for primal_id, faces in self.primals_faces.items():
+            #1
+            self.mb.tag_set_data(self.faces_primal_id_tag, faces, primal_id)

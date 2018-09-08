@@ -160,6 +160,12 @@ class Preprocessor(object):
 
         self.smm.propriedades()
 
+        self.smm.get_faces()
+
+        self.smm.set_volumes_in_primal()
+
+        self.smm.create_interfaces_primals()
+
         print('finalizou')
         t0 = time.time()
         print('tempo total')
