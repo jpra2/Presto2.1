@@ -103,6 +103,7 @@ class MsClassic_mono:
        lambda k1, k2: (2*k1*k2)/(k1+k2) # retorna a permeabilidade equivalente
     ]
 
+
     def add_gr(self):
 
         cont = 0
@@ -1895,6 +1896,8 @@ class MsClassic_mono:
         self.rho_tag = mb.tag_get_handle("RHO")
         self.mi_tag = mb.tag_get_handle("MI")
         self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
+        self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
+        self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
 
     def erro(self):
         for volume in self.all_fine_vols:
@@ -3724,6 +3727,92 @@ class MsClassic_mono:
         #0
         self.trans_fine.FillComplete()
 
+    def get_matrix_local(self, face):
+        """
+        obtem a matriz local e os elementos correspondentes
+        """
+        local_matrix = np.array([[1, -1],
+                                 [-1, 1]])
+        elems = self.mb.get_adjacencies(face, 3)
+        gids = self.mb.tag_get_data(self.global_id_tag, elems, flat=True)
+        k1 = self.mb.tag_get_data(self.perm_tag, elems[0]).reshape([3, 3])
+        k2 = self.mb.tag_get_data(self.perm_tag, elems[1]).reshape([3, 3])
+        centroid1 = self.mesh_topo_util.get_average_position([elems[0]])
+        centroid2 = self.mesh_topo_util.get_average_position([elems[1]])
+        direction = centroid2 - centroid1
+        uni = self.unitary(direction)
+        k1 = np.dot(np.dot(k1,uni),uni)
+        k2 = np.dot(np.dot(k2,uni),uni)
+        keq = self.kequiv(k1, k2)*(np.dot(self.A, uni))/(self.mi*abs(np.dot(direction, uni)))
+        local_matrix = keq*local_matrix
+
+        return local_matrix, elems, gids
+
+
+    def set_global_problem_vf_faces(self):
+        """
+        monta a matriz de transmissibilidade por faces
+        """
+
+        all_faces_set = self.mb.tag_get_data(self.all_faces_tag, 0, flat=True)[0]
+        all_faces_set = self.mb.get_entities_by_handle(all_faces_set)
+        all_faces_boundary_set = self.mb.tag_get_data(self.all_faces_boundary_tag, 0, flat=True)[0]
+        all_faces_boundary_set = self.mb.get_entities_by_handle(all_faces_boundary_set)
+
+        self.transfine = np.zeros((len(self.all_fine_vols), len(self.all_fine_vols)))
+        self.b = np.zeros(len(self.all_fine_vols))
+
+        # std_map = Epetra.Map(len(self.all_fine_vols),0,self.comm)
+        # self.tril_transfine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        # self.tril_b = Epetra.Vector(std_map)
+
+
+        for face in set(all_faces_set) - set(all_faces_boundary_set):
+            local_matrix, elems, gids = self.get_matrix_local(face)
+            if elems[0] not in self.wells_d:
+                self.transfine[gids[0], gids] += local_matrix[0]
+                # self.tril_transfine.InsertGlobalValues(gids[0], matrix_local[0], gids)
+            if elems[1] not in self.wells_d:
+                self.transfine[gids[1], gids] += local_matrix[1]
+                # self.tril_transfine.InsertGlobalValues(gids[1], matrix_local[1], gids)
+
+        for elem in self.wells_d:
+            gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
+            index = self.wells_d.index(elem)
+            self.transfine[gid, gid] = 1.0
+            self.b[gid] += self.set_p[index]
+            # self.tril_transfine.InsertGlobalValues(gid, [1.0], [gid])
+            # self.tril_b[gid] += self.set_p[index]
+
+        for elem in self.wells_n:
+            gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
+            index = self.wells_n.index(elem)
+            if elem in self.wells_inj:
+                self.b[gid] += self.set_q[index]
+                # self.tril_b[gid] += self.set_q[index]
+            else:
+                self.b[gid] += -self.set_q[index]
+                # self.tril_b[gid] += -self.set_q[index]
+
+        # for i in range(len(self.all_fine_vols)):
+        #
+        #     p = self.tril_transfine.ExtractGlobalRowCopy(i)
+        #     print(p[1])
+        #     print(p[0])
+        #     print(sum(p[0]))
+        #
+        #
+        #     cols = np.nonzero(self.transfine[i])[0]
+        #     print(cols)
+        #     print(self.transfine[i][cols])
+        #     print(sum(self.transfine[i]))
+        #
+        #     import pdb; pdb.set_trace()
+        #     print('\n')
+
+        # self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.asarray(Pf))
+        # self.mb.write_file('new_out_mono.vtk')
+
     def set_Pc(self):
         """
         seta a pressao nos volumes da malha grossa
@@ -3750,7 +3839,7 @@ class MsClassic_mono:
         perms = []
         perm_tensor = [1.0, 0.0, 0.0,
                         0.0, 1.0, 0.0,
-                        0.0, 0.0, 10.0]
+                        0.0, 0.0, 1.0]
 
         for elem in self.all_fine_vols:
             self.mb.tag_set_data(self.perm_tag, elem, perm_tensor)

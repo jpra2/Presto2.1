@@ -8,6 +8,7 @@ import sys
 import shutil
 import os
 import random
+import configparser
 
 
 class Msclassic_bif:
@@ -1037,10 +1038,6 @@ class Msclassic_bif:
                         "LAMB_O", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
-        self.volumes_in_primal_tag = mb.tag_get_handle(
-            "VOLUMES_IN_PRIMAL", 1, types.MB_TYPE_HANDLE,
-            types.MB_TAG_MESH, True)
-
         self.primal_id_tag = mb.tag_get_handle("PRIMAL_ID")
         self.faces_primal_id_tag = mb.tag_get_handle("PRIMAL_FACES")
         self.all_faces_primal_id_tag = mb.tag_get_handle("PRIMAL_ALL_FACES")
@@ -1064,6 +1061,8 @@ class Msclassic_bif:
         self.Swc_tag = mb.tag_get_handle("SWC")
         self.Swi_tag = mb.tag_get_handle("SWI")
         self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
+        self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
+        self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
 
     def Dirichlet_problem(self):
         """
@@ -1627,7 +1626,7 @@ class Msclassic_bif:
             #pwf = self.mb.tag_get_data(self.pwf_tag, well, flat=True)[0]
             if tipo_de_prescricao == 0:
                 wells_d.append(well)
-                set_p.append(valor_da_prescricao + (self.tz - centroid[2])*self.gama)
+                set_p.append(valor_da_prescricao + (self.tz - centroid[2])*self.gama_w)
             else:
                 wells_n.append(well)
                 set_q.append(valor_da_prescricao)
@@ -2509,7 +2508,7 @@ class Msclassic_bif:
         self.h2 = h2 # vetor com os tamanhos ao quadrado de cada volume
         self.h = h # vetor com os tamanhos de cada volume
         self.V = V # volume de um volume da malha fina
-        self.A = a # vetor com as areas
+        self.A = A # vetor com as areas
         self.tz = tz # tamanho total na direcao z
         self.viz_x = [1, -1]
         self.viz_y = [nx, -nx]

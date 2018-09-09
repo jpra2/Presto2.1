@@ -164,12 +164,12 @@ class gravidade(MsClassic_mono):
                     grad_z = (z_adj - z_vol)/float(abs(np.dot(direction, uni)))
                     grad_p2 = (padj2 - pvol2)/float(abs(np.dot(direction, uni)))
                     q = (grad_p)*keq - grad_z*keq*self.gama
-                    print((grad_p)*keq)
-                    print(- grad_z*keq*self.gama)
-                    print(q)
-                    print(self.store_flux_pf_gr[volume][tuple(unit)])
-                    print('\n')
-                    import pdb; pdb.set_trace()
+                    # print((grad_p)*keq)
+                    # print(- grad_z*keq*self.gama)
+                    # print(q)
+                    # print(self.store_flux_pf_gr[volume][tuple(unit)])
+                    # print('\n')
+                    # import pdb; pdb.set_trace()
 
                     if gid_adj > gid_vol:
                         v = -((grad_p2)*keq2 - grad_z*self.gama*keq2)
@@ -200,8 +200,8 @@ class gravidade(MsClassic_mono):
         for volume in set(self.all_fine_vols) - set(self.wells):
             gid = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
             values = store_flux[volume].values()
-            if sum(values) > lim4:
-                print('fluxo multiescala nao esta dando conservativo')
+            if abs(sum(values)) > lim4:
+                print('fluxo multiescala com gravidade nao esta dando conservativo')
                 print('gid:{0}'.format(gid))
                 print(sum(values))
                 import pdb; pdb.set_trace()
@@ -367,15 +367,27 @@ class gravidade(MsClassic_mono):
                 #2
                 else:
                     #3
-                    temp_k, temp_id, temp_hs, temp_kgr = self.mount_lines_5_gr(volume, map_volumes)
-                    temp_hs = np.array(temp_hs)
-                    temp_kgr = np.array(temp_kgr)
-                    b[map_volumes[volume]] += - (np.dot(temp_hs, temp_kgr))
-                    print(- (np.dot(temp_hs, temp_kgr)))
-                    print(temp_hs)
-                    print(temp_kgr)
-                    print('\n')
-                    import pdb; pdb.set_trace()
+                    for adj in adjs_vol:
+                        gid2 = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
+                        centroid_adj = self.mesh_topo_util.get_average_position([adj])
+                        z_adj = self.tz - centroid_adj[2]
+                        direction = centroid_adj - centroid_volume
+                        uni = self.unitary(direction)
+                        k_vol = np.dot(np.dot(k_vol,uni),uni)
+                        k_adj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                        k_adj = np.dot(np.dot(k_adj,uni),uni)
+                        keq = self.kequiv(k_vol, k_adj)
+                        keq = keq*(np.dot(self.A, uni))/(self.mi*abs(np.dot(direction, uni)))
+                        keq2 = keq*self.gama
+                        b[map_volumes[volume]] += -(z_adj - z_vol)*keq2
+
+                        temp_k.append(-keq)
+                        temp_id.append(map_volumes[adj])
+                        k_vol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+
+                    temp_k.append(-sum(temp_k))
+                    temp_id.append(map_volumes[volume])
+
                     if volume in self.wells_n:
                         #4
                         index = self.wells_n.index(volume)
@@ -414,8 +426,8 @@ class gravidade(MsClassic_mono):
         """
 
         # Solucao direta
-        self.set_contorno()
-        self.set_volumes_in_primal()
+        # self.set_contorno()
+        # self.set_volumes_in_primal()
         self.set_global_problem_gr_vf_3()
         self.Pf = self.solve_linear_problem(self.trans_fine, self.b, len(self.all_fine_vols_ic))
         self.organize_Pf()
@@ -424,6 +436,8 @@ class gravidade(MsClassic_mono):
         del self.Pf_all
         self.store_flux_pf_gr = self.create_flux_vector_pf_gr()
 
+
+        ##################################################
         # Solucao Multiescala
         self.calculate_restriction_op_2()
         self.calculate_prolongation_op_het()
@@ -447,8 +461,10 @@ class gravidade(MsClassic_mono):
         self.erro()
 
         self.test_conservation_coarse_gr()
-        # self.Neuman_problem_6_gr()
-        # self.store_flux_pms_gr = self.create_flux_vector_pms_gr()
+        self.Neuman_problem_6_gr()
+        self.store_flux_pms_gr = self.create_flux_vector_pms_gr()
+        ####################################################
+
 
 
 

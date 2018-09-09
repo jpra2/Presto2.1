@@ -40,7 +40,7 @@ sudo docker pull padmec/pymoab-pytrilinos:3.6
 l1 = [chamada1, chamada2]
 l2 = [chamada4, chamada5]
 l3 = [chamada4, chamada6]
-l4 = [chamada11, chamada9]
+l4 = [chamada11, chamada9] # monofasico com gravidade
 l5 = [chamada11, chamada12] # bifasico com gravidade
 l6 = [chamada11, chamada5]
 
@@ -48,10 +48,10 @@ l6 = [chamada11, chamada5]
 # os.chdir(principal)
 # os.system(chamada5)
 #
-# for i in l6:
-#     os.system(i)
+for i in l4:
+    os.system(i)
 
-os.system(chamada11)
+# os.system(chamada5)
 
 
 
