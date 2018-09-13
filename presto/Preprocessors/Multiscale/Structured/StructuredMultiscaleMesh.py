@@ -249,6 +249,14 @@ class StructuredMultiscaleMesh:
             "PRIMAL_ALL_FACES", 1, types.MB_TYPE_INTEGER,
             types.MB_TAG_SPARSE, True)
 
+        self.faces_wells_d_tag = self.mb.tag_get_handle(
+            "FACES_WELLS_D", 1, types.MB_TYPE_HANDLE,
+            types.MB_TAG_MESH, True)
+
+        self.faces_all_fine_vols_ic_tag = self.mb.tag_get_handle(
+            "FACES_ALL_FINE_VOLS_IC", 1, types.MB_TYPE_HANDLE,
+            types.MB_TAG_MESH, True)
+
     def _create_hexa(self, i, j, k):
         # TODO: Refactor this
         hexa = [self.verts[(i)+(j*(self.mesh_size[0]+1))+(k*((self.mesh_size[0]+1)*(self.mesh_size[1]+1)))],  # (i, j, k)
@@ -805,6 +813,7 @@ class StructuredMultiscaleMesh:
             wells_n)
 
     def create_wells_3(self):
+        self.wells_d = []
         wells = self.wells
         nx = self.mesh_size[0]
         ny = self.mesh_size[1]
@@ -871,6 +880,9 @@ class StructuredMultiscaleMesh:
             elem = self._get_elem_by_ijk((idx, idy, idz))
             #glob = self.mb.tag_get_data(self.gid_tag, elem, flat=True)[0]
 
+            if tipo_de_prescricao == 0:
+                self.wells_d.append(elem)
+
             self.mb.tag_set_data(self.tipo_de_poco_tag, elem, tipo_de_poco)
             self.mb.tag_set_data(self.tipo_de_fluido_tag, elem, tipo_de_fluido)
             self.mb.tag_set_data(self.tipo_de_prescricao_tag, elem, tipo_de_prescricao)
@@ -919,6 +931,8 @@ class StructuredMultiscaleMesh:
         all_fine_vols = self.mb.get_root_set()
         all_fine_vols = self.mb.get_entities_by_dimension(all_fine_vols, 3)
 
+        faces_wells_d_set = self.mb.create_meshset()
+        faces_all_fine_vols_ic_set = self.mb.create_meshset()
         all_faces_set = self.mb.create_meshset()
         all_faces_boundary_set = self.mb.create_meshset()
         set_faces = set()
@@ -926,6 +940,10 @@ class StructuredMultiscaleMesh:
         for elem in all_fine_vols:
             faces = self.mb.get_adjacencies(elem, 2, True)
             self.mb.add_entities(all_faces_set, faces)
+            if elem in self.wells_d:
+                self.mb.add_entities(faces_wells_d_set, faces)
+            else:
+                self.mb.add_entities(faces_all_fine_vols_ic_set, faces)
             for face in set(faces) - set_faces:
                 size = len(self.mb.get_adjacencies(face, 3))
                 if size < 2:
@@ -936,6 +954,8 @@ class StructuredMultiscaleMesh:
 
         self.mb.tag_set_data(self.all_faces_tag, 0, all_faces_set)
         self.mb.tag_set_data(self.all_faces_boundary_tag, 0, all_faces_boundary_set)
+        self.mb.tag_set_data(self.faces_wells_d_tag, 0, faces_wells_d_set)
+        self.mb.tag_set_data(self.faces_all_fine_vols_ic_tag, 0, faces_all_fine_vols_ic_set)
 
     def get_volumes_in_interfaces(self, fine_elems_in_primal, primal_id, **options):
 
@@ -979,7 +999,6 @@ class StructuredMultiscaleMesh:
         else:
             #1
             return volumes_in_interface
-
 
     def set_volumes_in_primal(self):
         """
@@ -1026,8 +1045,8 @@ class StructuredMultiscaleMesh:
                     primal_adj = self.mb.tag_get_data(self.primal_id_tag, int(fin_prim), flat=True)[0]
                     if primal_adj != primal_id:
                         #4
-                        faces_volume = set(self.mb.get_adjacencies(elem, 2))
-                        faces_adj = set(self.mb.get_adjacencies(adj, 2))
+                        faces_volume = set(self.mb.get_adjacencies(elem, 2, True))
+                        faces_adj = set(self.mb.get_adjacencies(adj, 2, True))
                         intersect = list(faces_volume & faces_adj)[0]
                         set_faces_primal.add(intersect)
                         try:
@@ -1042,7 +1061,7 @@ class StructuredMultiscaleMesh:
                             self.mb.add_entities(faces, [intersect])
             #1
             for elem in fine_elems_in_primal:
-                fine_faces = self.mb.get_adjacencies(elem, 2)
+                fine_faces = self.mb.get_adjacencies(elem, 2, True)
                 try:
                     #5
                     faces = self.all_faces_primals[primal_id]
@@ -1062,6 +1081,9 @@ class StructuredMultiscaleMesh:
             all_faces = j[1]
             self.mb.tag_set_data(self.faces_primal_id_tag, faces, primal_id)
             self.mb.tag_set_data(self.all_faces_primal_id_tag, all_faces, primal_id)
+
+
+
 
         #
         # for primal_id, faces in self.primals_faces.items():

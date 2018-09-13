@@ -31,9 +31,9 @@ class MsClassic_mono:
             self.root_set, types.MBENTITYSET, np.array([self.primal_id_tag]),
             np.array([None]))
 
-        self.faces_primals = self.mb.get_entities_by_type_and_tag(
-            self.root_set, types.MBENTITYSET, np.array([self.faces_primal_id_tag]),
-            np.array([None]))
+        # self.faces_primals = self.mb.get_entities_by_type_and_tag(
+        #     self.root_set, types.MBENTITYSET, np.array([self.faces_primal_id_tag]),
+        #     np.array([None]))
 
         self.ident_primal = []
         for primal in self.primals:
@@ -95,8 +95,6 @@ class MsClassic_mono:
             self.nf_ic = len(self.all_fine_vols_ic)
 
             # self.run_2()
-
-        print('saiu')
 
     funcoes = [
        lambda x: (x/np.linalg.norm(x))*(x/np.linalg.norm(x)), # unitario positivo na direcao de x
@@ -1857,9 +1855,9 @@ class MsClassic_mono:
                         "P", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
-        self.qw_tag = mb.tag_get_handle(
-                        "QW", 1, types.MB_TYPE_DOUBLE,
-                        types.MB_TAG_SPARSE, True)
+        # self.qw_tag = mb.tag_get_handle(
+        #                 "QW", 1, types.MB_TYPE_DOUBLE,
+        #                 types.MB_TAG_SPARSE, True)
 
         self.perm_tag = mb.tag_get_handle(
                         "PERM", 9, types.MB_TYPE_DOUBLE,
@@ -1868,6 +1866,10 @@ class MsClassic_mono:
         self.volumes_in_interface_tag = mb.tag_get_handle(
             "VOLUMES_IN_INTERFACE", 1, types.MB_TYPE_HANDLE,
             types.MB_TAG_MESH, True)
+
+        self.qpms_coarse_tag = mb.tag_get_handle(
+                        "QPMS_COARSE", 1, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
 
         self.global_id_tag = mb.tag_get_handle("GLOBAL_ID")
 
@@ -1898,6 +1900,9 @@ class MsClassic_mono:
         self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
         self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
         self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
+        self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
+        self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
+
 
     def erro(self):
         for volume in self.all_fine_vols:
@@ -3727,7 +3732,7 @@ class MsClassic_mono:
         #0
         self.trans_fine.FillComplete()
 
-    def get_matrix_local(self, face):
+    def get_local_matrix(self, face):
         """
         obtem a matriz local e os elementos correspondentes
         """
@@ -3748,19 +3753,22 @@ class MsClassic_mono:
 
         return local_matrix, elems, gids
 
-
     def set_global_problem_vf_faces(self):
         """
         monta a matriz de transmissibilidade por faces
         """
 
+        # faces_wells_d_set = self.mb.tag_get_data(self.faces_wells_d_tag, 0, flat=True)[0]
+        # faces_wells_d_set = self.mb.get_entities_by_handle(faces_wells_d_set)
+        # faces_all_fine_vols_ic_set = self.mb.tag_get_data(self.faces_all_fine_vols_ic_tag, 0, flat=True)[0]
+        # faces_all_fine_vols_ic_set = self.mb.get_entities_by_handle(faces_all_fine_vols_ic_set)
         all_faces_set = self.mb.tag_get_data(self.all_faces_tag, 0, flat=True)[0]
         all_faces_set = self.mb.get_entities_by_handle(all_faces_set)
         all_faces_boundary_set = self.mb.tag_get_data(self.all_faces_boundary_tag, 0, flat=True)[0]
         all_faces_boundary_set = self.mb.get_entities_by_handle(all_faces_boundary_set)
 
-        self.transfine = np.zeros((len(self.all_fine_vols), len(self.all_fine_vols)))
-        self.b = np.zeros(len(self.all_fine_vols))
+        transfine = np.zeros((len(self.all_fine_vols), len(self.all_fine_vols)))
+        b = np.zeros(len(self.all_fine_vols))
 
         # std_map = Epetra.Map(len(self.all_fine_vols),0,self.comm)
         # self.tril_transfine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
@@ -3768,19 +3776,19 @@ class MsClassic_mono:
 
 
         for face in set(all_faces_set) - set(all_faces_boundary_set):
-            local_matrix, elems, gids = self.get_matrix_local(face)
+            local_matrix, elems, gids = self.get_local_matrix(face)
             if elems[0] not in self.wells_d:
-                self.transfine[gids[0], gids] += local_matrix[0]
+                transfine[gids[0], gids] += local_matrix[0]
                 # self.tril_transfine.InsertGlobalValues(gids[0], matrix_local[0], gids)
             if elems[1] not in self.wells_d:
-                self.transfine[gids[1], gids] += local_matrix[1]
+                transfine[gids[1], gids] += local_matrix[1]
                 # self.tril_transfine.InsertGlobalValues(gids[1], matrix_local[1], gids)
 
         for elem in self.wells_d:
             gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
             index = self.wells_d.index(elem)
-            self.transfine[gid, gid] = 1.0
-            self.b[gid] += self.set_p[index]
+            transfine[gid, gid] = 1.0
+            b[gid] += self.set_p[index]
             # self.tril_transfine.InsertGlobalValues(gid, [1.0], [gid])
             # self.tril_b[gid] += self.set_p[index]
 
@@ -3788,10 +3796,10 @@ class MsClassic_mono:
             gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
             index = self.wells_n.index(elem)
             if elem in self.wells_inj:
-                self.b[gid] += self.set_q[index]
+                b[gid] += self.set_q[index]
                 # self.tril_b[gid] += self.set_q[index]
             else:
-                self.b[gid] += -self.set_q[index]
+                b[gid] += -self.set_q[index]
                 # self.tril_b[gid] += -self.set_q[index]
 
         # for i in range(len(self.all_fine_vols)):
@@ -3812,6 +3820,83 @@ class MsClassic_mono:
 
         # self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.asarray(Pf))
         # self.mb.write_file('new_out_mono.vtk')
+
+        return transfine, b
+
+    def set_global_problem_vf_faces_2(self):
+        """
+        monta a matriz de transmissibilidade por faces
+        exclui os volumes com pressao prescrita
+        """
+        faces_wells_d_set = self.mb.tag_get_data(self.faces_wells_d_tag, 0, flat=True)[0]
+        faces_wells_d_set = self.mb.get_entities_by_handle(faces_wells_d_set)
+        faces_all_fine_vols_ic_set = self.mb.tag_get_data(self.faces_all_fine_vols_ic_tag, 0, flat=True)[0]
+        faces_all_fine_vols_ic_set = self.mb.get_entities_by_handle(faces_all_fine_vols_ic_set)
+        all_faces_set = self.mb.tag_get_data(self.all_faces_tag, 0, flat=True)[0]
+        all_faces_set = self.mb.get_entities_by_handle(all_faces_set)
+        all_faces_boundary_set = self.mb.tag_get_data(self.all_faces_boundary_tag, 0, flat=True)[0]
+        all_faces_boundary_set = self.mb.get_entities_by_handle(all_faces_boundary_set)
+
+        transfine = np.zeros((len(self.all_fine_vols_ic), len(self.all_fine_vols_ic)))
+        b = np.zeros(len(self.all_fine_vols_ic))
+
+        # std_map = Epetra.Map(len(self.all_fine_vols),0,self.comm)
+        # self.tril_transfine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        # self.tril_b = Epetra.Vector(std_map)
+
+        for face in set(faces_all_fine_vols_ic_set) - (set(all_faces_boundary_set) | set(faces_wells_d_set)):
+            local_matrix, elems, gids = self.get_local_matrix(face)
+            local_gids = [self.map_vols_ic[elems[0]], self.map_vols_ic[elems[1]]]
+
+            transfine[local_gids[0], local_gids] += local_matrix[0]
+            transfine[local_gids[1], local_gids] += local_matrix[1]
+
+        dict_wells_d = dict(zip(self.wells_d, self.set_p))
+        for face in set(faces_all_fine_vols_ic_set) & set(faces_wells_d_set):
+            local_matrix , elems, gids = self.get_local_matrix(face)
+            elem_well_d = list(set(elems) & set(self.wells_d))[0]
+
+            if elems[0] == elem_well_d:
+                elem = elems[1]
+            else:
+                elem = elems[0]
+
+            local_gid = self.map_vols_ic[elem]
+            p = dict_wells_d[elem_well_d]
+            b[local_gid] += p*local_matrix[0,0]
+            transfine[local_gid, local_gid] += local_matrix[0,0]
+
+        dict_wells_n = dict(zip(self.wells_n, self.set_q))
+        for elem in self.wells_n:
+            local_gid = self.map_vols_ic[elem]
+            if elem in self.wells_inj:
+                b[local_gid] += dict_wells_n[elem]
+                # self.tril_b[gid] += self.set_q[index]
+            else:
+                b[local_gid] += dict_wells_n[elem]
+                # self.tril_b[gid] += -self.set_q[index]
+
+        # for i in range(len(self.all_fine_vols)):
+        #
+        #     p = self.tril_transfine.ExtractGlobalRowCopy(i)
+        #     print(p[1])
+        #     print(p[0])
+        #     print(sum(p[0]))
+        #
+        #
+        #     cols = np.nonzero(self.transfine[i])[0]
+        #     print(cols)
+        #     print(self.transfine[i][cols])
+        #     print(sum(self.transfine[i]))
+        #
+        #     import pdb; pdb.set_trace()
+        #     print('\n')
+
+        # self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.asarray(Pf))
+        # self.mb.write_file('new_out_mono.vtk')
+
+        Pf = np.linalg.solve(transfine, b)
+        import pdb; pdb.set_trace()
 
     def set_Pc(self):
         """

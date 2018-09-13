@@ -1063,6 +1063,8 @@ class Msclassic_bif:
         self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
         self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
         self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
+        self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
+        self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
 
     def Dirichlet_problem(self):
         """

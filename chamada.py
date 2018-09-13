@@ -16,6 +16,7 @@ chamada9 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 b
 chamada10 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python -m Preprocessor.py structured.cfg\"'
 chamada11 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python -m Preprocess structured.cfg\"'
 chamada12 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python script_gravidade_bif.py\"'
+chamada13 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_mono_faces.py\"'
 
 # windows
 chamada20 = 'docker run -t -it -v /c/Users/jp/Documents/git/local/Presto2:/elliptic padmec/elliptic:1.0 bash -c \"cd /elliptic; python -m  structured.cfg\"'
@@ -38,20 +39,21 @@ sudo docker pull padmec/pymoab-pytrilinos:3.6
 
 
 l1 = [chamada1, chamada2]
-l2 = [chamada4, chamada5]
+l2 = [chamada11, chamada5] # monofasico
 l3 = [chamada4, chamada6]
 l4 = [chamada11, chamada9] # monofasico com gravidade
 l5 = [chamada11, chamada12] # bifasico com gravidade
 l6 = [chamada11, chamada5]
+l7 = [chamada11, chamada13] # monofasico por faces
 
 
 # os.chdir(principal)
 # os.system(chamada5)
 #
-for i in l4:
-    os.system(i)
+# for i in l7:
+#     os.system(i)
 
-# os.system(chamada5)
+os.system(chamada13)
 
 
 

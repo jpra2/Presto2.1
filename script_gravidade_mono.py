@@ -473,7 +473,7 @@ class gravidade(MsClassic_mono):
 
 
         print('acaboooou')
-        self.mb.write_file('new_out_mono.vtk')
+        self.mb.write_file('new_out_mono_gr.vtk')
 
     def test_conservation_coarse_gr(self):
         """
