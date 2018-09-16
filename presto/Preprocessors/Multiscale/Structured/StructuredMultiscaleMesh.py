@@ -23,6 +23,7 @@ class StructuredMultiscaleMesh:
         self.coarse_ratio = coarse_ratio
         self.mesh_size = mesh_size
         self.block_size = block_size
+        self.A = np.array([block_size[1]*block_size[2], block_size[0]*block_size[2], block_size[0]*block_size[1]])
         self.wells = wells
         self.prop = prop
 
@@ -256,6 +257,10 @@ class StructuredMultiscaleMesh:
         self.faces_all_fine_vols_ic_tag = self.mb.tag_get_handle(
             "FACES_ALL_FINE_VOLS_IC", 1, types.MB_TYPE_HANDLE,
             types.MB_TAG_MESH, True)
+
+        self.perm_tag = self.mb.tag_get_handle(
+                        "PERM", 9, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
 
     def _create_hexa(self, i, j, k):
         # TODO: Refactor this
@@ -566,6 +571,8 @@ class StructuredMultiscaleMesh:
         return dual_volume_set
 
     def generate_dual(self):
+
+
         min_coarse_ids = np.array([0, 0, 0])
         max_coarse_ids = np.array([max(self.primal_ids[0]),
                                    max(self.primal_ids[1]),
@@ -904,6 +911,7 @@ class StructuredMultiscaleMesh:
 
         if self.prop['flag_sim'] == 0:
             self.mb.tag_set_data(self.mi_tag, elem, self.prop['mi'])
+            self.mi = self.prop['mi']
             self.mb.tag_set_data(self.gama_tag, elem, self.prop['gama'])
             self.mb.tag_set_data(self.rho_tag, elem, self.prop['rho'])
         else:
@@ -1082,26 +1090,227 @@ class StructuredMultiscaleMesh:
             self.mb.tag_set_data(self.faces_primal_id_tag, faces, primal_id)
             self.mb.tag_set_data(self.all_faces_primal_id_tag, all_faces, primal_id)
 
+    def set_perm(self):
+
+        """
+        seta a permeabilidade dos volumes da malha fina
+        """
+
+        all_fine_vols = self.mb.get_root_set()
+        all_fine_vols = self.mb.get_entities_by_dimension(all_fine_vols, 3)
+
+        # perms = []
+        perm_tensor = [1.0, 0.0, 0.0,
+                        0.0, 1.0, 0.0,
+                        0.0, 0.0, 1.0]
+
+        for elem in all_fine_vols:
+            self.mb.tag_set_data(self.perm_tag, elem, perm_tensor)
 
 
-
+        # perm_tensor = [10.0,  0.0, 0.0,
+        #                 0.0, 10.0, 0.0,
+        #                 0.0,  0.0, 5.0]
         #
-        # for primal_id, faces in self.primals_faces.items():
-        #     #1
-        #     self.mb.tag_set_data(self.faces_primal_id_tag, faces, primal_id)
-        # #0
-        # for primal_id, all_faces in self.all_faces_primals.items():
-        #     #1
-        #     self.mb.tag_set_data(self.all_faces_primal_id_tag, all_faces, primal_id)
+        # for volume in self.all_fine_vols:
+        #     self.mb.tag_set_data(self.perm_tag, volume, perm_tensor)
 
-        # all_faces_primals = self.mb.get_entities_by_type_and_tag(
-        #     root_set, types.MBENTITYSET, np.array([self.all_faces_primal_id_tag]),
-        #     np.array([None]))
+
+        # perm_tensor = [10.0,  0.0, 0.0,
+        #                 0.0, 10.0, 0.0,
+        #                 0.0,  0.0, 1.0]
         #
-        # for all_faces in all_faces_primals:
-        #     elems = self.mb.get_entities_by_handle(all_faces)
-        #     for face in elems:
-        #         vols = self.mb.get_adjacencies(face, 3)
-        #         gids = self.mb.tag_get_data(self.gid_tag, vols, flat=True)
-        #         print(gids)
-        #         import pdb; pdb.set_trace()
+        # perm_tensor2 = [20.0,  0.0, 0.0,
+        #                  0.0, 20.0, 0.0,
+        #                  0.0,  0.0, 2.0]
+        #
+        # cont = 0
+        # for elem in self.all_fine_vols:
+        #     if cont%2 == 0:
+        #         self.mb.tag_set_data(self.perm_tag, elem, perm_tensor)
+        #     else:
+        #         self.mb.tag_set_data(self.perm_tag, elem, perm_tensor2)
+        #     cont += 1
+
+
+        # for volume in self.all_fine_vols:
+        #     k = random.randint(1, 10001)*1e-3
+        #     perm_tensor = [k, 0, 0,
+        #                    0, k, 0,
+        #                    0, 0, 0.1*k]
+        #     perms.append(perm_tensor)
+        #     self.mb.tag_set_data(self.perm_tag, volume, perm_tensor)
+        #
+        # perms = np.array(perms)
+        # np.savez_compressed('perms_an', perms = perms)
+
+
+        # for volume in self.all_fine_vols:
+        #     k1 = random.randint(1, 1001)*(10**(-3))
+        #     k2 = random.randint(1, 1001)*(10**(-3))
+        #     k3 = random.randint(1, 1001)*(10**(-3))
+        #
+        #     perm_tensor = [k1, 0, 0,
+        #                    0, k2, 0,
+        #                    0, 0, k3]
+        #     perms.append(perm_tensor)
+        #     self.mb.tag_set_data(self.perm_tag, volume, perm_tensor)
+        #
+        # perms = np.array(perms)
+        # np.savez_compressed('perms_an', perms = perms)
+
+
+        # # permeabilidades em camadas z
+        # cont = 0
+        # elems = []
+        #
+        # val = int(self.nx/2.0)
+        # gid1 = np.array([0, 0, 0])
+        # gid2 = np.array([val, self.ny-1, self.nz-1])
+        # dif =  gid2 - gid1 + np.array([1, 1, 1])
+        # gids = []
+        # for k in range(dif[2]):
+        #     for j in range(dif[1]):
+        #         for i in range(dif[0]):
+        #             gid = gid1 + np.array([i, j, k])
+        #             gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #             gids.append(gid)
+        #
+        #
+        ### caixa no meio
+        # gid1 = np.array([5, 5, 5])
+        # gid2 = np.array([9, 9, 9])
+        # dif =  gid2 - gid1 + np.array([1, 1, 1])
+        # gids = []
+        # for k in range(dif[2]):
+        #     for j in range(dif[1]):
+        #         for i in range(dif[0]):
+        #             gid = gid1 + np.array([i, j, k])
+        #             gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #             gids.append(gid)
+        #
+        #
+        #
+        # perm_tensor_1 = [1.0, 0.0, 0.0,
+        #                 0.0, 1.0, 0.0,
+        #                 0.0, 0.0, 1.0]
+        #
+        # perm_tensor_2 = [0.001, 0.0, 0.0,
+        #                  0.0, 0.001, 0.0,
+        #                  0.0, 0.0, 0.001]
+        #
+        #
+        # k1 = 1.0
+        # k2 = 0.001
+        #
+        # for volume in self.all_fine_vols:
+        #     gid = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
+        #     if gid in gids:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_2)
+        #         self.mb.tag_set_data(self.k_tag, volume, k2)
+        #     else:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_1)
+        #         self.mb.tag_set_data(self.k_tag, volume, k1)
+
+        # sudo docker pull padmec/elliptic:1.0
+        # k3 = 100.0
+        # perm_tensor_3 = [100.0, 0.0, 0.0,
+        #                  0.0, 100.0, 0.0,
+        #                  0.0, 0.0, 100.0]
+        #
+        # k1 = 1.0
+        # perm_tensor_1 = [1.0, 0.0, 0.0,
+        #                  0.0, 1.0, 0.0,
+        #                  0.0, 0.0, 1.0]
+        #
+        # k2 = 10.0
+        # perm_tensor_2 = [k2, 0.0, 0.0,
+        #                  0.0, k2, 0.0,
+        #                  0.0, 0.0, k2]
+        #
+        # k4 = 1000.0
+        # perm_tensor_4 = [k4, 0.0, 0.0,
+        #                  0.0, k4, 0.0,
+        #                  0.0, 0.0, k4]
+        #
+        # gid1 = np.array([0, 0, 0])
+        # gid2 = np.array([14, 29, 14])
+        # dif = gid2 - gid1 + np.array([1, 1, 1])
+        #
+        # gids1 = []
+        # for k in range(dif[2]):
+        #     for j in range(dif[1]):
+        #         for i in range(dif[0]):
+        #             gid = gid1 + np.array([i, j, k])
+        #             gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #             gids1.append(gid)
+        #
+        # gid1 = np.array([15, 0, 0])
+        # gid2 = np.array([29, 29, 14])
+        # dif = gid2 - gid1 + np.array([1, 1, 1])
+        #
+        # gids2 = []
+        # for k in range(dif[2]):
+        #     for j in range(dif[1]):
+        #         for i in range(dif[0]):
+        #             gid = gid1 + np.array([i, j, k])
+        #             gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #             gids2.append(gid)
+        #
+        # gid1 = np.array([0, 0, 14])
+        # gid2 = np.array([14, 29, 29])
+        # dif = gid2 - gid1 + np.array([1, 1, 1])
+        #
+        # gids3 = []
+        # for k in range(dif[2]):
+        #     for j in range(dif[1]):
+        #         for i in range(dif[0]):
+        #             gid = gid1 + np.array([i, j, k])
+        #             gid = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #             gids3.append(gid)
+        #
+        #
+        # for volume in self.all_fine_vols:
+        #     gid_vol = self.mb.tag_get_data(self.global_id_tag, volume, flat = True)[0]
+        #     if gid_vol in gids1:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_1)
+        #         self.mb.tag_set_data(self.k_tag, volume, k1)
+        #     elif gid_vol in gids2:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_2)
+        #         self.mb.tag_set_data(self.k_tag, volume, k2)
+        #     elif gid_vol in gids3:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_3)
+        #         self.mb.tag_set_data(self.k_tag, volume, k3)
+        #     else:
+        #         self.mb.tag_set_data(self.perm_tag, volume, perm_tensor_4)
+        #         self.mb.tag_set_data(self.k_tag, volume, k4)
+
+
+
+
+        # for k in range(self.nz):
+        #     gids = []
+        #     gid1 = np.array([0, 0, k])
+        #     gid2 = np.array([self.nx-1, self.ny-1, k])
+        #     dif = (gid2 - gid1) + np.array([1, 1, 1])
+        #     perm = random.randint(1, 999)*(10**(-3))
+        #     for l in range(dif[2]):
+        #         for m in range(dif[1]):
+        #             for n in range(dif[0]):
+        #                 gid = gid1 + np.array([n, m, l])
+        #                 global_id = gid[0] + gid[1]*self.nx + gid[2]*self.nx*self.ny
+        #                 elem = self.map_gids_in_elems[global_id]
+        #                 perm_tensor = [perm, 0.0, 0.0,
+        #                                 0.0, perm, 0.0,
+        #                                 0.0, 0.0, perm]
+        #                 perms.append(perm_tensor)
+        #                 self.mb.tag_set_data(self.perm_tag, elem, perm_tensor)
+        # perms = np.array(perms)
+        # np.savez_compressed('perms', perms = perms)
+
+        # carregar de um arquivo existente
+        # perms = np.load('perms_an.npz')['perms']
+        # i = 0
+        # for elem in self.all_fine_vols:
+        #     self.mb.tag_set_data(self.perm_tag, elem, perms[i])
+        #     i += 1

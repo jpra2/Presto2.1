@@ -46,9 +46,7 @@ class MsClassic_mono:
         for collocation_point_set in self.sets:
             collocation_point = self.mb.get_entities_by_handle(collocation_point_set)[0]
             self.set_of_collocation_points_elems.add(collocation_point)
-        gids = self.mb.tag_get_data(self.global_id_tag, self.all_fine_vols, flat = True)
-        self.map_gids_in_elems = dict(zip(gids, self.all_fine_vols))
-        elem0 = self.map_gids_in_elems[0]
+        elem0 = self.all_fine_vols[0]
         self.ro = self.mb.tag_get_data(self.rho_tag, elem0, flat=True)[0]
         self.mi = self.mb.tag_get_data(self.mi_tag, elem0, flat=True)[0]
         self.gama = self.mb.tag_get_data(self.gama_tag, elem0, flat=True)[0]
@@ -59,12 +57,15 @@ class MsClassic_mono:
         else:
             self.get_wells_gr()
 
-        self.set_perm()
+
+        # self.set_perm()
         # self.set_perm_2()
         # self.read_perms_and_phi_spe10()
         self.nf = len(self.all_fine_vols)
         self.nc = len(self.primals)
-        self.map_all_fine_vols = dict(zip(self.all_fine_vols, gids))
+        # self.map_all_fine_vols = dict(zip(self.all_fine_vols, gids))
+
+
 
         # self.set_volumes_in_interface()
 
@@ -1859,10 +1860,6 @@ class MsClassic_mono:
         #                 "QW", 1, types.MB_TYPE_DOUBLE,
         #                 types.MB_TAG_SPARSE, True)
 
-        self.perm_tag = mb.tag_get_handle(
-                        "PERM", 9, types.MB_TYPE_DOUBLE,
-                        types.MB_TAG_SPARSE, True)
-
         self.volumes_in_interface_tag = mb.tag_get_handle(
             "VOLUMES_IN_INTERFACE", 1, types.MB_TYPE_HANDLE,
             types.MB_TAG_MESH, True)
@@ -1878,6 +1875,12 @@ class MsClassic_mono:
         self.elem_primal_id_tag = mb.tag_get_handle(
             "FINE_PRIMAL_ID", 1, types.MB_TYPE_INTEGER, True,
             types.MB_TAG_SPARSE)
+
+        self.line_elems_tag = self.mb.tag_get_handle(
+            "LINE_ELEMS", 6, types.MB_TYPE_DOUBLE, types.MB_TAG_SPARSE, True)
+
+        self.column_elems_tag = self.mb.tag_get_handle(
+            "COLUMN_ELEMS", 6, types.MB_TYPE_DOUBLE, types.MB_TAG_SPARSE, True)
 
         self.atualizar_tag = mb.tag_get_handle("ATUALIZAR")
         self.primal_id_tag = mb.tag_get_handle("PRIMAL_ID")
@@ -1902,7 +1905,7 @@ class MsClassic_mono:
         self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
         self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
         self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
-
+        self.perm_tag = mb.tag_get_handle("PERM")
 
     def erro(self):
         for volume in self.all_fine_vols:
@@ -2217,7 +2220,7 @@ class MsClassic_mono:
 
         return x
 
-    def mount_lines_1(self, volume, map_id):
+    def mount_lines_1(self, volume, map_id, flag = 0):
         """
         monta as linhas da matriz
         retorna o valor temp_k e o mapeamento temp_id
@@ -2226,6 +2229,7 @@ class MsClassic_mono:
         #0
         # volume_centroid = self.mb.tag_get_data(self.centroid_tag, volume, flat=True)
         lim = 1e-7
+        cont = 0
         gid1 = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
         volume_centroid = self.mesh_topo_util.get_average_position([volume])
         adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
@@ -2236,6 +2240,7 @@ class MsClassic_mono:
         for adj in adj_volumes:
             #1
             # adj_centroid = self.mb.tag_get_data(self.centroid_tag, adj, flat=True)
+            cont += 1
             gid2 = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
             adj_centroid = self.mesh_topo_util.get_average_position([adj])
             direction = adj_centroid - volume_centroid
@@ -2252,6 +2257,20 @@ class MsClassic_mono:
         #0
         temp_k.append(-sum(temp_k))
         temp_ids.append(map_id[volume])
+
+
+
+        if flag == 1:
+            cols = np.zeros(6)
+            lines = cols.copy()
+            temp_ids = np.array(temp_ids)
+            temp_k = np.array(temp_k)
+            cols[0:cont] = temp_ids[0:cont]
+            lines[0:cont] = temp_k[0:cont]
+            return lines, cols
+
+
+
 
         return temp_k, temp_ids
 
@@ -3732,6 +3751,17 @@ class MsClassic_mono:
         #0
         self.trans_fine.FillComplete()
 
+    def set_lines_elems(self):
+
+        gids = self.mb.tag_get_data(self.global_id_tag, self.all_fine_vols, flat=True)
+        map_global = dict(zip(self.all_fine_vols, gids))
+
+
+        for elem in self.all_fine_vols:
+            temp_k, temp_id = self.mount_lines_1(elem, map_global, flag = 1)
+            self.mb.tag_set_data(self.line_elems_tag, elem, temp_k)
+            self.mb.tag_set_data(self.column_elems_tag, elem, temp_id)
+
     def get_local_matrix(self, face):
         """
         obtem a matriz local e os elementos correspondentes
@@ -4230,7 +4260,7 @@ class MsClassic_mono:
         linearProblem = Epetra.LinearProblem(A, x, b)
         solver = AztecOO.AztecOO(linearProblem)
         solver.SetAztecOption(AztecOO.AZ_output, AztecOO.AZ_warnings)
-        solver.Iterate(1000, 1e-9)
+        solver.Iterate(1000, 1e-13)
 
         return x
 
@@ -4473,6 +4503,14 @@ class MsClassic_mono:
         eliminacao das linhas e colunas dos volumes com pressao prescrita
         """
         #0
+        # import pdb; pdb.set_trace()
+        # for elem in self.all_fine_vols:
+        #     gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
+        #     print(gid)
+        #     print('\n')
+        #
+        # import pdb; pdb.set_trace()
+
         self.set_contorno()
         lim = 10**(-7)
         t1 = time.time()
