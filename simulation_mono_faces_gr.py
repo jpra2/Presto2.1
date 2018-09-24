@@ -4,15 +4,17 @@ from pymoab import types
 from pymoab import topo_util
 from PyTrilinos import Epetra, AztecOO, EpetraExt  # , Amesos
 import time
-import math
+# import math
 import os
-import shutil
-import random
+# import shutil
+# import random
 import sys
 from test34 import MsClassic_mono
 
 
-class MsClassic_mono_faces(MsClassic_mono):
+
+
+class MsClassic_mono_faces_gr(MsClassic_mono):
     def __init__(self, ind = False):
         super().__init__(ind = ind)
 
@@ -325,12 +327,12 @@ class MsClassic_mono_faces(MsClassic_mono):
                 except KeyError:
                     Qpf[elem] = qpf[elem]
 
-    def create_flux_vector_pf_2(self):
+    def create_flux_vector_pf_2_gr(self):
         soma_inj = 0
         soma_prod = 0
         lim = 1e-7
 
-        with open('fluxo_malha_fina.txt', 'w') as arq:
+        with open('fluxo_malha_fina_gr.txt', 'w') as arq:
 
             for elem in self.all_fine_vols:
                 gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
@@ -340,8 +342,11 @@ class MsClassic_mono_faces(MsClassic_mono):
                 all_adjs = self.mesh_topo_util.get_bridge_adjacencies(elem, 2, 3)
                 pf_adjs = self.mb.tag_get_data(self.pf_tag, all_adjs, flat=True)
                 pf_elem = self.mb.tag_get_data(self.pf_tag, elem, flat=True)[0]
-                flux_pf = -(pf_elem*(-sum(temp_k)) + np.dot(pf_adjs, temp_k))
-                if abs(flux_pf) > lim and elem not in (set(self.wells_inj) | set(self.wells_prod)):
+                z_elem = self.tz - self.mesh_topo_util.get_average_position([elem])[2]
+                z_adjs = np.array([self.tz - self.mesh_topo_util.get_average_position([adj])[2]
+                                   for adj in all_adjs])
+                flux_pf = -(pf_elem*(-sum(temp_k)) + np.dot(pf_adjs, temp_k)) + self.gama*(z_elem*(-sum(temp_k)) + np.dot(z_adjs, temp_k))
+                if abs(flux_pf) > lim and elem not in self.wells:
                     print('nao esta dando conservativo na malha fina')
                     print(flux_pf)
                     print(gid)
@@ -357,7 +362,7 @@ class MsClassic_mono_faces(MsClassic_mono):
             arq.write('soma_inj:{0}\n'.format(soma_inj))
             arq.write('soma_prod:{0}\n'.format(soma_prod))
 
-    def create_flux_vector_pms_2(self):
+    def create_flux_vector_pms_2_gr(self):
         soma_inj = 0
         soma_prod = 0
         lim = 1e-7
@@ -365,18 +370,18 @@ class MsClassic_mono_faces(MsClassic_mono):
         volumes_in_primal_set = self.mb.tag_get_data(self.volumes_in_primal_tag, 0, flat=True)[0]
         volumes_in_primal_set = self.mb.get_entities_by_handle(volumes_in_primal_set)
 
-        with open('fluxo_multiescala.txt', 'w') as arq:
+        with open('fluxo_multiescala_gr.txt', 'w') as arq:
             #1
             map_volumes = dict(zip(self.all_fine_vols, range(len(self.all_fine_vols))))
             for elem in set(self.all_fine_vols) - set(volumes_in_primal_set):
 
                 gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
-                values, adjs_elem = self.mount_lines_3(elem, map_volumes, flag = 1)
+                values, adjs_elem, source_grav = self.mount_lines_3_gr(elem, map_volumes, flag = 1)
                 pms_adjs = self.mb.tag_get_data(self.pcorr_tag, adjs_elem, flat=True)
                 pms_elem = self.mb.tag_get_data(self.pcorr_tag, elem, flat=True)[0]
-                flux_pms = -(pms_elem*(-sum(values)) + np.dot(pms_adjs, values))
-                if abs(flux_pms) > lim and elem not in (set(self.wells_inj) | set(self.wells_prod)):
-                    print('nao esta dando conservativo na malha finao fluxo multiescala')
+                flux_pms = -(pms_elem*(-sum(values)) + np.dot(pms_adjs, values)) + source_grav
+                if abs(flux_pms) > lim and elem not in self.wells:
+                    print('nao esta dando conservativo na malha fina o fluxo multiescala')
                     print(flux_pms)
                     print(gid)
                     import pdb; pdb.set_trace()
@@ -396,13 +401,13 @@ class MsClassic_mono_faces(MsClassic_mono):
                 for elem in volumes_in_primal:
 
                     gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
-                    values, adjs_elem = self.mount_lines_3(elem, map_volumes, flag = 1)
+                    values, adjs_elem, source_grav = self.mount_lines_3_gr(elem, map_volumes, flag = 1)
                     pms_adjs = self.mb.tag_get_data(self.pcorr_tag, adjs_elem, flat=True)
                     pms_elem = self.mb.tag_get_data(self.pcorr_tag, elem, flat=True)[0]
-                    flux_pms = -(pms_elem*(-sum(values)) + np.dot(pms_adjs, values))
+                    flux_pms = -(pms_elem*(-sum(values)) + np.dot(pms_adjs, values)) + source_grav
                     q1 = self.mb.tag_get_data(self.qpms_coarse_tag, elem, flat=True)[0]
                     flux_pms += q1
-                    if abs(flux_pms) > lim and elem not in (set(self.wells_inj) | set(self.wells_prod)):
+                    if abs(flux_pms) > lim and elem not in self.wells:
                         print('nao esta dando conservativo na malha fina o fluxo multiescala')
                         print(flux_pms)
                         print(gid)
@@ -574,6 +579,36 @@ class MsClassic_mono_faces(MsClassic_mono):
         else:
             return values, ids
 
+    def mount_lines_3_gr(self, elem, map_local, **options):
+        """
+        monta as linhas da matriz de transmissiblidade
+
+        flag == 1: retorna os elemntos vizinhos presentes em map_local
+        """
+
+        gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
+        z_elem = self.tz - self.mesh_topo_util.get_average_position([elem])[2]
+        values = self.mb.tag_get_data(self.line_elems_tag, elem, flat=True)
+        loc = np.where(values != 0)
+        values = values[loc].copy()
+        all_adjs = self.mesh_topo_util.get_bridge_adjacencies(elem, 2, 3)
+        gid_adjs = self.mb.tag_get_data(self.global_id_tag, all_adjs, flat=True)
+        z_adjs = [self.tz - self.mesh_topo_util.get_average_position([i])[2] for i in all_adjs]
+        map_values = dict(zip(all_adjs, values))
+        map_z_adjs = dict(zip(all_adjs, z_adjs))
+        local_elems = [i for i in all_adjs if i in map_local.keys()]
+        values = [map_values[i] for i in local_elems]
+        zs = [map_z_adjs[i] for i in local_elems]
+        local_elems.append(elem)
+        values.append(-sum(values))
+        zs.append(z_elem)
+        source_grav = self.gama*(np.dot(np.array(zs), np.array(values)))
+        ids = [map_local[i] for i in local_elems]
+        if options.get("flag") == 1:
+            return values, local_elems, source_grav
+        else:
+            return values, ids, source_grav
+
     def Neuman_problem_6_faces(self):
 
         """
@@ -651,7 +686,7 @@ class MsClassic_mono_faces(MsClassic_mono):
 
             self.mb.tag_set_data(self.pcorr_tag, fine_elems_in_primal, np.asarray(x))
 
-    def Neuman_problem_7(self):
+    def Neuman_problem_7_gr(self):
         # self.set_of_collocation_points_elems = set()
         #0
 
@@ -690,9 +725,9 @@ class MsClassic_mono_faces(MsClassic_mono):
                 #2
                 elif elem in volumes_in_primal:
                     #3
-                    temp_k, temp_id = self.mount_lines_3(elem, map_volumes)
+                    temp_k, temp_id, source_grav = self.mount_lines_3_gr(elem, map_volumes)
                     q_in = self.mb.tag_get_data(self.qpms_coarse_tag, elem, flat=True)
-                    b[map_volumes[elem]] += q_in
+                    b[map_volumes[elem]] += q_in + source_grav
 
                     if elem in self.wells_n:
                         #4
@@ -707,7 +742,8 @@ class MsClassic_mono_faces(MsClassic_mono):
                 #2
                 else:
                     #3
-                    temp_k, temp_id = self.mount_lines_3(elem, map_volumes)
+                    temp_k, temp_id, source_grav = self.mount_lines_3_gr(elem, map_volumes)
+                    b[map_volumes[elem]] += source_grav
                     if elem in self.wells_n:
                         #4
                         if elem in self.wells_inj:
@@ -720,19 +756,9 @@ class MsClassic_mono_faces(MsClassic_mono):
 
                 #2
                 A.InsertGlobalValues(map_volumes[elem], temp_k, temp_id)
-                # A_np[map_volumes[volume], temp_id] = temp_k
-                # print('primal_id')
-                # print(self.ident_primal[primal_id])
-                # print('gid: {0}'.format(gid1))
-                # print('temp_id:{0}'.format(temp_id))
-                # print('temp_k:{0}'.format(temp_k))
-                # print(A_np[map_volumes[volume]])
-                # print('b_np:{0}'.format(b_np[map_volumes[volume]]))
             #1
             A.FillComplete()
             x = self.solve_linear_problem(A, b, dim)
-            # x_np = np.linalg.solve(A_np, b_np)
-            # print(x_np)
             self.mb.tag_set_data(self.pcorr_tag, fine_elems_in_primal, np.asarray(x))
 
     def organize_Pf_2(self):
@@ -851,7 +877,7 @@ class MsClassic_mono_faces(MsClassic_mono):
 
         return trans_fine, b
 
-    def set_global_problem_vf_4(self):
+    def set_global_problem_vf_4_gr(self):
         """
         transmissibilidade da malha fina excluindo os volumes com pressao prescrita
         obs: com funcao para obter dados dos elementos
@@ -867,8 +893,9 @@ class MsClassic_mono_faces(MsClassic_mono):
         for volume in self.all_fine_vols_ic - set(self.neigh_wells_d):
             #1
 
-            temp_k, temp_glob_adj = self.mount_lines_3(volume, self.map_vols_ic)
+            temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, self.map_vols_ic)
             self.trans_fine.InsertGlobalValues(self.map_vols_ic[volume], temp_k, temp_glob_adj)
+            self.b[self.map_vols_ic[volume]] += source_grav
             if volume in self.wells_n:
                 #2
                 if volume in self.wells_inj:
@@ -883,6 +910,7 @@ class MsClassic_mono_faces(MsClassic_mono):
             #1
             global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
             volume_centroid = self.mesh_topo_util.get_average_position([volume])
+            z_volume = self.tz - volume_centroid[2]
             adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
             kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
             soma = 0.0
@@ -892,14 +920,16 @@ class MsClassic_mono_faces(MsClassic_mono):
                 #2
                 global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
                 adj_centroid = self.mesh_topo_util.get_average_position([adj])
+                z_adj = self.tz - adj_centroid[2]
                 direction = adj_centroid - volume_centroid
-                # uni = self.unitary(direction)
-                uni = self.funcoes[0](direction)
+                uni = self.unitary(direction)
+                # uni = self.funcoes[0](direction)
                 kvol = np.dot(np.dot(kvol,uni),uni)
                 kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
                 kadj = np.dot(np.dot(kadj,uni),uni)
                 keq = self.kequiv(kvol, kadj)
                 keq = keq*(np.dot(self.A, uni))/float(abs(self.mi*np.dot(direction, uni)))
+                self.b[self.map_vols_ic[volume]] += -self.gama*(z_adj - z_volume)*keq
                 if adj in self.wells_d:
                     #3
                     soma = soma + keq
@@ -928,7 +958,7 @@ class MsClassic_mono_faces(MsClassic_mono):
         #0
         self.trans_fine.FillComplete()
 
-    def test_conservation_coarse_2(self):
+    def test_conservation_coarse_2_gr(self):
         """
         verifica se o fluxo é conservativo nos volumes da malha grossa
         utilizando a pressao multiescala para calcular os fluxos na interface dos mesmos
@@ -950,46 +980,42 @@ class MsClassic_mono_faces(MsClassic_mono):
             for volume in volumes_in_primal:
                 #2
                 gid = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
+                pvol = self.mb.tag_get_data(self.pms_tag, volume, flat=True)[0]
                 adjs_vol = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
                 adjs_vol = [i for i in adjs_vol if i not in fine_elems_in_primal]
+                centroid_volume = self.mesh_topo_util.get_average_position([volume])
+                z_vol = self.tz - centroid_volume[2]
                 for adj in adjs_vol:
                     #3
-                    # my_adjs.add(adj)
-                    gid2 = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
-                    primal_id_adj = self.mb.tag_get_data(self.fine_to_primal_tag, adj, flat=True)[0]
-                    primal_id_adj = self.mb.tag_get_data(self.primal_id_tag, primal_id_adj, flat=True)[0]
-                    pvol = self.mb.tag_get_data(self.pms_tag, volume, flat=True)[0]
                     padj = self.mb.tag_get_data(self.pms_tag, adj, flat=True)[0]
                     kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
                     kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
-                    centroid_volume = self.mesh_topo_util.get_average_position([volume])
                     centroid_adj = self.mesh_topo_util.get_average_position([adj])
+                    z_adj = self.tz - centroid_adj[2]
                     direction = centroid_adj - centroid_volume
                     uni = self.unitary(direction)
                     kvol = np.dot(np.dot(kvol,uni),uni)
                     kadj = np.dot(np.dot(kadj,uni),uni)
                     keq = self.kequiv(kvol, kadj)
-                    keq = keq*(np.dot(self.A, uni))/(self.mi) #*np.dot(self.h, uni))
-                    grad_p = (padj - pvol)/float(abs(np.dot(direction, uni)))
-                    q = (grad_p)*keq
+                    keq = keq*(np.dot(self.A, uni))/float(abs(self.mi*np.dot(direction, uni)))
+                    grad_p = (padj - pvol)
+                    grad_z = (z_adj - z_vol)#/float(abs(np.dot(direction, uni)))
+                    q = (grad_p)*keq - grad_z*keq*self.gama
+                    Qc += q
                     try:
                         q1 = self.mb.tag_get_data(self.qpms_coarse_tag, volume, flat=True)[0]
                     except RuntimeError:
                         q1 = 0.0
                     self.mb.tag_set_data(self.qpms_coarse_tag, volume, q1+q)
-                    Qc += q
-
-
             #1
-            # print('Primal:{0} ///// Qc: {1}'.format(primal_id, Qc))
             Qc2.append(Qc)
             prim.append(primal_id)
             self.mb.tag_set_data(self.flux_coarse_tag, fine_elems_in_primal, np.repeat(Qc, len(fine_elems_in_primal)))
-            # if Qc > lim:
-            #     print('Qc nao deu zero')
-            #     import pdb; pdb.set_trace()
+            if Qc > lim and len(set(fine_elems_in_primal) & set(self.wells)) < 1:
+                print('Qc nao deu zero')
+                import pdb; pdb.set_trace()
 
-        with open('Qc.txt', 'w') as arq:
+        with open('Qc_gr.txt', 'w') as arq:
             for i,j in zip(prim, Qc2):
                 arq.write('Primal:{0} ///// Qc: {1}\n'.format(i, j))
             arq.write('\n')
@@ -1045,7 +1071,7 @@ class MsClassic_mono_faces(MsClassic_mono):
         t0 = time.time()
         print('tempo:{0}'.format(t0 - tin))
         print('set_global_problem')
-        self.set_global_problem_vf_4()
+        self.set_global_problem_vf_4_gr()
         t1 = time.time()
         print('tempo:{0}'.format(t1 - t0))
 
@@ -1066,10 +1092,12 @@ class MsClassic_mono_faces(MsClassic_mono):
         self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.asarray(self.Pf))
         del self.Pf
 
+
         print('flux_vector_pf')
         t40 = time.time()
-        self.create_flux_vector_pf_2()
+        self.create_flux_vector_pf_2_gr()
         ##########################################################
+
 
         ###########################################
         # Solucao multiescala
@@ -1112,46 +1140,47 @@ class MsClassic_mono_faces(MsClassic_mono):
         self.mb.tag_set_data(self.pms_tag, self.all_fine_vols, np.asarray(self.Pms))
         print('test_conservation_coarse')
         t30 = time.time()
-        self.test_conservation_coarse_2()
+        self.test_conservation_coarse_2_gr()
         t31 = time.time()
         print('tempo:{0}'.format(t31-t30))
         print('Neuman_problem')
-        self.Neuman_problem_7()
+        self.Neuman_problem_7_gr()
         t32 = time.time()
         print('tempo:{0}'.format(t32-t31))
         print('create_flux_vector_pms')
-        self.create_flux_vector_pms_2()
+        self.create_flux_vector_pms_2_gr()
         t33 = time.time()
         print('tempo:{0}'.format(t33-t32))
         t_end = time.time()
         self.erro()
 
         #########################################################
+
         self.mb.write_file('new_out_mono.vtk')
 
 
-        print('tempo_montagem_transm_fina')
-        print(t1 - t0)
-        print('tempo_sol_direta')
-        print(tempo_sol_direta)
-        print('tempo_sol_direta_sem_transm')
-        print(t2 - t0 - (t1 - t0))
-        print('tempo_sol_multiescala')
-        print(tempo_sol_multiescala)
-        print('tempo_sol_mult_sem_transm')
-        print(t6 - t3)
-        print('tempo prol')
-        print(t_prol)
-        print('tempo_restricao')
-        print(t_res)
-        print('tempo_solucao_mult')
-        print(t_sol)
-        print('tempo_total')
-        print(t_end - tin)
-        print('tempo_organize_op')
-        print(t5 - t10)
+        # print('tempo_montagem_transm_fina')
+        # print(t1 - t0)
+        # print('tempo_sol_direta')
+        # print(tempo_sol_direta)
+        # print('tempo_sol_direta_sem_transm')
+        # print(t2 - t0 - (t1 - t0))
+        # print('tempo_sol_multiescala')
+        # print(tempo_sol_multiescala)
+        # print('tempo_sol_mult_sem_transm')
+        # print(t6 - t3)
+        # print('tempo prol')
+        # print(t_prol)
+        # print('tempo_restricao')
+        # print(t_res)
+        # print('tempo_solucao_mult')
+        # print(t_sol)
+        # print('tempo_total')
+        # print(t_end - tin)
+        # print('tempo_organize_op')
+        # print(t5 - t10)
 
 
 
-simulation = MsClassic_mono_faces(ind = True)
+simulation = MsClassic_mono_faces_gr(ind = True)
 simulation.run_faces()

@@ -10,6 +10,7 @@ import shutil
 import random
 import sys
 import configparser
+import cython
 
 
 class MsClassic_mono:
@@ -1820,10 +1821,6 @@ class MsClassic_mono:
                         "P_CORR", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
-        self.k_tag = mb.tag_get_handle(
-                        "K", 1, types.MB_TYPE_DOUBLE,
-                        types.MB_TAG_SPARSE, True)
-
         self.contorno_tag = mb.tag_get_handle(
                         "CONTORNO", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
@@ -1876,11 +1873,7 @@ class MsClassic_mono:
             "FINE_PRIMAL_ID", 1, types.MB_TYPE_INTEGER, True,
             types.MB_TAG_SPARSE)
 
-        self.line_elems_tag = self.mb.tag_get_handle(
-            "LINE_ELEMS", 6, types.MB_TYPE_DOUBLE, types.MB_TAG_SPARSE, True)
 
-        self.column_elems_tag = self.mb.tag_get_handle(
-            "COLUMN_ELEMS", 6, types.MB_TYPE_DOUBLE, types.MB_TAG_SPARSE, True)
 
         self.atualizar_tag = mb.tag_get_handle("ATUALIZAR")
         self.primal_id_tag = mb.tag_get_handle("PRIMAL_ID")
@@ -1901,11 +1894,12 @@ class MsClassic_mono:
         self.rho_tag = mb.tag_get_handle("RHO")
         self.mi_tag = mb.tag_get_handle("MI")
         self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
-        self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
-        self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
-        self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
-        self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
+        # self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
+        # self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
+        # self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
+        # self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
         self.perm_tag = mb.tag_get_handle("PERM")
+        self.line_elems_tag = self.mb.tag_get_handle("LINE_ELEMS")
 
     def erro(self):
         for volume in self.all_fine_vols:
@@ -4260,7 +4254,7 @@ class MsClassic_mono:
         linearProblem = Epetra.LinearProblem(A, x, b)
         solver = AztecOO.AztecOO(linearProblem)
         solver.SetAztecOption(AztecOO.AZ_output, AztecOO.AZ_warnings)
-        solver.Iterate(1000, 1e-13)
+        solver.Iterate(10000, 1e-14)
 
         return x
 

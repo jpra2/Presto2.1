@@ -53,6 +53,7 @@ class Msclassic_bif:
         self.gama_ = self.gama_w + self.gama_o
         self.gama = self.gama_
 
+
         self.nw = self.mb.tag_get_data(self.nw_tag, elem0, flat=True)[0] # expoente da agua para calculo da permeabilidade relativa
         self.no = self.mb.tag_get_data(self.no_tag, elem0, flat=True)[0] # expoente do oleo para calculo da permeabilidade relativa
         self.Sor = self.mb.tag_get_data(self.Sor_tag, elem0, flat=True)[0] # saturacao residual de oleo
@@ -75,7 +76,7 @@ class Msclassic_bif:
 
 
         # self.read_perms_and_phi_spe10()
-        self.set_k() # seta a permeabilidade em cada volume
+        # self.set_k() # seta a permeabilidade em cada volume
         self.set_fi() # seta a porosidade em cada volume
         if self.flag_grav == 1:
             self.get_wells_gr()
@@ -84,20 +85,18 @@ class Msclassic_bif:
         # self.read_perm_rel() # le o arquivo txt perm_rel.txt
         gids = self.mb.tag_get_data(self.global_id_tag, self.all_fine_vols , flat = True)
         self.map_gids_in_all_fine_vols = dict(zip(gids, self.all_fine_vols)) # mapeamento dos gids nos elementos
-
         self.neigh_wells_d = [] #volumes da malha fina vizinhos aos pocos de pressao prescrita
-        for volume in self.wells:
+        for volume in self.wells_d:
 
             global_volume = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
-            if volume in self.wells_d:
 
-                adjs_volume = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
-                for adj in adjs_volume:
+            adjs_volume = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+            for adj in adjs_volume:
 
-                    global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
-                    if (adj not in self.wells_d) and (adj not in self.neigh_wells_d):
+                global_adj = self.mb.tag_get_data(self.global_id_tag, adj, flat=True)[0]
+                if (adj not in self.wells_d) and (adj not in self.neigh_wells_d):
 
-                        self.neigh_wells_d.append(adj)
+                    self.neigh_wells_d.append(adj)
 
         self.all_fine_vols_ic = set(self.all_fine_vols) - set(self.wells_d)
         # self.all_volumes_ic =  volumes da malha fina que sao incognitas
@@ -157,7 +156,7 @@ class Msclassic_bif:
                 arq.write('{0}'.format(int(0)))
             self.pasta = self.caminho5
 
-        os.chdir(self.caminho1)
+        # os.chdir(self.caminho1)
 
     def calculate_local_problem_het(self, elems, lesser_dim_meshsets, support_vals_tag):
         std_map = Epetra.Map(len(elems), 0, self.comm)
@@ -933,6 +932,22 @@ class Msclassic_bif:
                         "FLUX_COARSE", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
+        self.flux_fine_pms_tag = mb.tag_get_handle(
+                        "FLUX_FINE_PMS", 1, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
+
+        self.flux_fine_pf_tag = mb.tag_get_handle(
+                        "FLUX_FINE_PF", 1, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
+
+        self.Pc2_tag = mb.tag_get_handle(
+                        "PC2", 1, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
+
+        self.fi_tag = mb.tag_get_handle(
+                        "FI", 1, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
+
         self.prod_tag = mb.tag_get_handle(
                         "PROD", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
@@ -948,10 +963,6 @@ class Msclassic_bif:
 
         self.vel_tag = mb.tag_get_handle(
                         "VEL", 1, types.MB_TYPE_DOUBLE,
-                        types.MB_TAG_SPARSE, True)
-
-        self.Pc2_tag = mb.tag_get_handle(
-                        "PC2", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
         self.pf2_tag = mb.tag_get_handle(
@@ -994,14 +1005,6 @@ class Msclassic_bif:
                         "FLUX_W", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
-        self.flux_fine_pms_tag = mb.tag_get_handle(
-                        "FLUX_FINE_PMS", 1, types.MB_TYPE_DOUBLE,
-                        types.MB_TAG_SPARSE, True)
-
-        self.flux_fine_pf_tag = mb.tag_get_handle(
-                        "FLUX_FINE_PF", 1, types.MB_TYPE_DOUBLE,
-                        types.MB_TAG_SPARSE, True)
-
         self.p_tag = mb.tag_get_handle(
                         "P", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
@@ -1014,6 +1017,10 @@ class Msclassic_bif:
                         "PERM", 9, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
+        self.qpms_coarse_tag = mb.tag_get_handle(
+                        "QPMS_COARSE", 1, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
+
         self.global_id_tag = mb.tag_get_handle("GLOBAL_ID")
 
         self.collocation_point_tag = mb.tag_get_handle("COLLOCATION_POINT")
@@ -1024,10 +1031,6 @@ class Msclassic_bif:
 
         self.sat_tag = mb.tag_get_handle(
                         "SAT", 1, types.MB_TYPE_DOUBLE,
-                        types.MB_TAG_SPARSE, True)
-
-        self.fi_tag = mb.tag_get_handle(
-                        "FI", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
         self.lamb_w_tag = mb.tag_get_handle(
@@ -1061,10 +1064,12 @@ class Msclassic_bif:
         self.Swc_tag = mb.tag_get_handle("SWC")
         self.Swi_tag = mb.tag_get_handle("SWI")
         self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
-        self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
-        self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
-        self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
-        self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
+        # self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
+        # self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
+        # self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
+        # self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
+        self.perm_tag = mb.tag_get_handle("PERM")
+        self.line_elems_tag = self.mb.tag_get_handle("LINE_ELEMS")
 
     def Dirichlet_problem(self):
         """
@@ -1550,14 +1555,14 @@ class Msclassic_bif:
 
     def get_wells(self):
         """
-        obtem os gids dos volumes dos pocos
+        elementos dos pocos
 
-        wells_d = gids do poco com pressao prescrita
-        wells_n = gids do poco com vazao prescrita
+        wells_d = elementos com pressao prescrita
+        wells_n = elementos com vazao prescrita
         set_p = valor da pressao
         set_q = valor da vazao
-        wells_inj = gids dos pocos injetores
-        wells_prod = gids dos pocos produtores
+        wells_inj = elementos injetores
+        wells_prod = elementos produtores
         """
         wells_d = []
         wells_n = []
@@ -3252,7 +3257,7 @@ class Msclassic_bif:
         linearProblem = Epetra.LinearProblem(A, x, b)
         solver = AztecOO.AztecOO(linearProblem)
         solver.SetAztecOption(AztecOO.AZ_output, AztecOO.AZ_warnings)
-        solver.Iterate(1000, 1e-9)
+        solver.Iterate(10000, 1e-14)
 
         return x
 
@@ -3352,7 +3357,6 @@ class Msclassic_bif:
         if sum(Qc2) > lim:
             print('sum QC: {0}'.format(sum(Qc2)))
             import pdb; pdb.set_trace()
-
 
     def unitary(self, l):
         """
@@ -3481,6 +3485,7 @@ class Msclassic_bif:
 
     def run_2(self):
         #0
+        os.chdir(self.caminho1)
         t0 = time.time()
         self.prod_w = []
         self.prod_o = []

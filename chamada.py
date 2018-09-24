@@ -17,6 +17,8 @@ chamada10 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 
 chamada11 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python -m Preprocess structured.cfg\"'
 chamada12 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python script_gravidade_bif.py\"'
 chamada13 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_mono_faces.py\"'
+chamada14 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_mono_faces_gr.py\"'
+chamada15 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_bif_2.py\"'
 
 # windows
 chamada20 = 'docker run -t -it -v /c/Users/jp/Documents/git/local/Presto2:/elliptic padmec/elliptic:1.0 bash -c \"cd /elliptic; python -m  structured.cfg\"'
@@ -45,15 +47,17 @@ l4 = [chamada11, chamada9] # monofasico com gravidade
 l5 = [chamada11, chamada12] # bifasico com gravidade
 l6 = [chamada11, chamada5]
 l7 = [chamada11, chamada13] # monofasico por faces
+l8 = [chamada11, chamada14] # monofasico por elemento com gravidade
+l9 = [chamada11, chamada15] # bifasico sem gravidade por elemento
 
 
 # os.chdir(principal)
 # os.system(chamada5)
 #
-# for i in l7:
-#     os.system(i)
+for i in l9:
+    os.system(i)
 
-os.system(chamada13)
+# os.system(chamada15)
 
 
 

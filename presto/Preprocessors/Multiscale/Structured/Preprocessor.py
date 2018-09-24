@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import sys
+import cProfile as cp
 
 from .StructuredMultiscaleMesh import StructuredMultiscaleMesh
 
@@ -131,7 +132,7 @@ class Preprocessor(object):
             self.coarse_ratio, self.mesh_size, self.block_size, self.wells, self.prop)
 
     def run(self, moab):
-        t1 = time.time()
+        tin = time.time()
         self.smm.set_moab(moab)
 
         self.smm.calculate_primal_ids()
@@ -156,22 +157,63 @@ class Preprocessor(object):
 
         #self.smm.create_wells()
         #self.smm.create_wells_2()
+        print('create_wells')
+        t0 = time.time()
         self.smm.create_wells_3()
+        print("took {0}\n".format(time.time()-t0))
 
+        print('propriedades')
+        t0 = time.time()
         self.smm.propriedades()
+        print("took {0}\n".format(time.time()-t0))
 
+        # print('get_faces')
+        # t0 = time.time()
         # self.smm.get_faces()
+        # print("took {0}\n".format(time.time()-t0))
 
+        print('set_volumes_in_primal')
+        t0 = time.time()
         self.smm.set_volumes_in_primal()
+        print("took {0}\n".format(time.time()-t0))
 
+        # print('create_interfaces_primals')
+        # t0 = time.time()
         # self.smm.create_interfaces_primals()
+        # print("took {0}\n".format(time.time()-t0))
 
+        print('set_perm')
+        t0 = time.time()
         self.smm.set_perm()
+        print("took {0}\n".format(time.time()-t0))
+
+
+        print('set_lines')
+        t0 = time.time()
+        if self.sim == 0:
+            self.smm.set_lines_elems()
+        else:
+            self.smm.set_lines_elems_bif()
+        print("took {0}\n".format(time.time()-t0))
+
+
+
+
+        # self.smm.set_lines_elems_faces()
+        #
+        #
+        # t2 = time.time()
+        # print('por elementos:{0}'.format(t1 - t0))
+        # print('por faces:{0}'.format(t2 - t1))
+        # print("took {0}\n".format(time.time()-t0))
 
         print('finalizou')
-        t0 = time.time()
+        tend = time.time()
         print('tempo total')
-        print(t0-t1)
+        print(tend-tin)
+
+
+
 
     @property
     def structured_configs(self):

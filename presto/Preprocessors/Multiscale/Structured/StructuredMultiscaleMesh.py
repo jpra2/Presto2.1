@@ -2,6 +2,9 @@ import numpy as np
 from pymoab import core
 from pymoab import types
 from pymoab import topo_util
+import cProfile as cp
+import time
+
 
 
 class StructuredMultiscaleMesh:
@@ -261,6 +264,9 @@ class StructuredMultiscaleMesh:
         self.perm_tag = self.mb.tag_get_handle(
                         "PERM", 9, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
+
+        self.line_elems_tag = self.mb.tag_get_handle(
+            "LINE_ELEMS", 6, types.MB_TYPE_DOUBLE, types.MB_TAG_SPARSE, True)
 
     def _create_hexa(self, i, j, k):
         # TODO: Refactor this
@@ -965,6 +971,31 @@ class StructuredMultiscaleMesh:
         self.mb.tag_set_data(self.faces_wells_d_tag, 0, faces_wells_d_set)
         self.mb.tag_set_data(self.faces_all_fine_vols_ic_tag, 0, faces_all_fine_vols_ic_set)
 
+    def get_local_matrix(self, face, **options):
+        """
+        obtem a matriz local e os elementos correspondentes
+        se flag == 1 retorna o fluxo multiescala entre dois elementos separados pela face
+        """
+
+
+        elems = self.mb.get_adjacencies(face, 3)
+        adjs = [self.mesh_topo_util.get_bridge_adjacencies(elems[0], 2, 3),
+                self.mesh_topo_util.get_bridge_adjacencies(elems[1], 2, 3)]
+
+        adjs = [dict(zip(adjs[0], range(len(adjs[0])))), dict(zip(adjs[1], range(len(adjs[1]))))]
+
+        k1 = self.mb.tag_get_data(self.perm_tag, elems[0]).reshape([3, 3])
+        k2 = self.mb.tag_get_data(self.perm_tag, elems[1]).reshape([3, 3])
+        centroid1 = self.mesh_topo_util.get_average_position([elems[0]])
+        centroid2 = self.mesh_topo_util.get_average_position([elems[1]])
+        direction = centroid2 - centroid1
+        uni = self.unitary(direction)
+        k1 = np.dot(np.dot(k1,uni),uni)
+        k2 = np.dot(np.dot(k2,uni),uni)
+        keq = self.kequiv(k1, k2)*(np.dot(self.A, uni))/(self.mi*abs(np.dot(direction, uni)))
+
+        return -keq, elems, adjs
+
     def get_volumes_in_interfaces(self, fine_elems_in_primal, primal_id, **options):
 
         """
@@ -1098,14 +1129,18 @@ class StructuredMultiscaleMesh:
 
         all_fine_vols = self.mb.get_root_set()
         all_fine_vols = self.mb.get_entities_by_dimension(all_fine_vols, 3)
+        zeros = np.zeros(6)
+        self.mb.tag_set_data(self.line_elems_tag, all_fine_vols, np.repeat(zeros, len(all_fine_vols)))
 
         # perms = []
         perm_tensor = [1.0, 0.0, 0.0,
                         0.0, 1.0, 0.0,
                         0.0, 0.0, 1.0]
 
+
         for elem in all_fine_vols:
             self.mb.tag_set_data(self.perm_tag, elem, perm_tensor)
+
 
 
         # perm_tensor = [10.0,  0.0, 0.0,
@@ -1314,3 +1349,162 @@ class StructuredMultiscaleMesh:
         # for elem in self.all_fine_vols:
         #     self.mb.tag_set_data(self.perm_tag, elem, perms[i])
         #     i += 1
+
+    def kequiv(self,k1,k2):
+        """
+        obbtem o k equivalente entre k1 e k2
+
+        """
+        #keq = ((2*k1*k2)/(h1*h2))/((k1/h1) + (k2/h2))
+        keq = (2*k1*k2)/(k1+k2)
+
+        return keq
+
+    def unitary(self,l):
+        """
+        obtem o vetor unitario positivo da direcao de l
+
+        """
+        uni = l/np.linalg.norm(l)
+        uni = uni*uni
+
+        return uni
+
+    def mount_lines_1(self, volume, map_id):
+        """
+        monta as linhas da matriz
+        retorna o valor temp_k e o mapeamento temp_id
+        map_id = mapeamento dos elementos
+        """
+        #0
+        lim = 1e-7
+        cont = 0
+        volume_centroid = self.mesh_topo_util.get_average_position([volume])
+        adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+        temp_k = []
+        for adj in adj_volumes:
+            #1
+            cont += 1
+            kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            adj_centroid = self.mesh_topo_util.get_average_position([adj])
+            direction = adj_centroid - volume_centroid
+            uni = self.unitary(direction)
+            kvol = np.dot(np.dot(kvol,uni),uni)
+            kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+            kadj = np.dot(np.dot(kadj,uni),uni)
+            keq = self.kequiv(kvol, kadj)
+            keq = keq*(np.dot(self.A, uni))/float(abs(self.mi*np.dot(direction, uni)))
+            temp_k.append(-keq)
+        #0
+        # temp_ids.append(map_id[volume])
+
+
+
+        # if flag == 1:
+        #     cols = np.zeros(6)
+        #     lines = cols.copy()
+        #     temp_ids = np.array(temp_ids)
+        #     temp_k = np.array(temp_k)
+        #     cols[0:cont] = temp_ids[0:cont]
+        #     lines[0:cont] = temp_k[0:cont]
+        #     return lines, cols
+        #
+        #
+        #
+        #
+        # return temp_k, temp_ids
+
+        line = np.zeros(6)
+        # temp_k = np.array(temp_k)
+        line[0:cont] = temp_k
+        return line
+
+    def mount_lines_1_bif(self, volume, map_id, flag = 0):
+        """
+        monta as linhas da matriz para o problema bifasico
+        retorna o valor temp_k e o mapeamento temp_id
+        map_id = mapeamento dos elementos
+        """
+        #0
+        # volume_centroid = self.mb.tag_get_data(self.centroid_tag, volume, flat=True)
+        lim = 1e-7
+        cont = 0
+        gid1 = self.mb.tag_get_data(self.gid_tag, volume, flat=True)[0]
+        volume_centroid = self.mesh_topo_util.get_average_position([volume])
+        adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+        # soma = 0.0
+        temp_ids = []
+        temp_k = []
+        for adj in adj_volumes:
+            #1
+            # adj_centroid = self.mb.tag_get_data(self.centroid_tag, adj, flat=True)
+            cont += 1
+            gid2 = self.mb.tag_get_data(self.gid_tag, adj, flat=True)[0]
+            adj_centroid = self.mesh_topo_util.get_average_position([adj])
+            direction = adj_centroid - volume_centroid
+            uni = self.unitary(direction)
+            kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+            kvol = np.dot(np.dot(kvol,uni),uni)
+            kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+            kadj = np.dot(np.dot(kadj,uni),uni)
+            keq = self.kequiv(kvol, kadj)
+            keq = keq*(np.dot(self.A, uni))/float(abs(np.dot(direction, uni)))
+            temp_ids.append(map_id[adj])
+            temp_k.append(-keq)
+        #0
+        temp_k.append(-sum(temp_k))
+        temp_ids.append(map_id[volume])
+
+
+
+        if flag == 1:
+            cols = np.zeros(6)
+            lines = cols.copy()
+            temp_ids = np.array(temp_ids)
+            temp_k = np.array(temp_k)
+            cols[0:cont] = temp_ids[0:cont]
+            lines[0:cont] = temp_k[0:cont]
+            return lines, cols
+
+
+
+
+        return temp_k, temp_ids
+
+    def set_lines_elems(self):
+        root_set = self.mb.get_root_set()
+        all_fine_vols = self.mb.get_entities_by_dimension(root_set, 3)
+        gids = self.mb.tag_get_data(self.gid_tag, all_fine_vols, flat=True)
+
+        map_global = dict(zip(all_fine_vols, gids))
+
+        for elem in all_fine_vols:
+            # temp_k, temp_id = self.mount_lines_1(elem, map_global, flag = 1)
+            temp_k = self.mount_lines_1(elem, map_global)
+            self.mb.tag_set_data(self.line_elems_tag, elem, temp_k)
+
+    def set_lines_elems_bif(self):
+        root_set = self.mb.get_root_set()
+        all_fine_vols = self.mb.get_entities_by_dimension(root_set, 3)
+        gids = self.mb.tag_get_data(self.gid_tag, all_fine_vols, flat=True)
+
+        map_global = dict(zip(all_fine_vols, gids))
+
+        for elem in all_fine_vols:
+            temp_k, temp_id = self.mount_lines_1_bif(elem, map_global, flag = 1)
+            self.mb.tag_set_data(self.line_elems_tag, elem, temp_k)
+
+    def set_lines_elems_faces(self):
+
+        all_faces_set = self.mb.tag_get_data(self.all_faces_tag, 0, flat=True)[0]
+        all_faces_set = self.mb.get_entities_by_handle(all_faces_set) # todas as faces do dominio
+        all_faces_boundary_set = self.mb.tag_get_data(self.all_faces_boundary_tag, 0, flat=True)[0]
+        all_faces_boundary_set = self.mb.get_entities_by_handle(all_faces_boundary_set) # faces do contorno do dominio
+
+
+        for face in set(all_faces_set) - set(all_faces_boundary_set):
+            keq, elems, adjs = self.get_local_matrix(face)
+            lines = self.mb.tag_get_data(self.line_elems_tag, elems)
+            lines[0][adjs[0][elems[1]]] = keq
+            lines[1][adjs[1][elems[0]]] = keq
+            self.mb.tag_set_data(self.line_elems_tag, elems, lines)
