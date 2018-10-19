@@ -1,13 +1,20 @@
+import pyximport; pyximport.install()
 import numpy as np
 from pymoab import core
 from pymoab import types
 from pymoab import topo_util
 import cProfile as cp
 import time
+import importlib
+
+PLUGIN_NAME = 'tools_cy_py.tools_c'
+
+# tools_c = importlib.import_module(PLUGIN_NAME, '.')
 
 
 
-class StructuredMultiscaleMesh:
+
+class Structured_AMS_Mesh:
     """ Defines a structured multiscale mesh representation.
 
     Parameters
@@ -283,6 +290,10 @@ class StructuredMultiscaleMesh:
 
         self.edge_volumes_tag = self.mb.tag_get_handle(
             "EDGE_VOLUMES", 1, types.MB_TYPE_HANDLE,
+            types.MB_TAG_MESH, True)
+
+        self.vertex_volumes_tag = self.mb.tag_get_handle(
+            "VERTEX_VOLUMES", 1, types.MB_TYPE_HANDLE,
             types.MB_TAG_MESH, True)
 
     def _create_hexa(self, i, j, k):
@@ -1509,9 +1520,12 @@ class StructuredMultiscaleMesh:
         root_set = self.mb.get_root_set()
         all_fine_vols = self.mb.get_entities_by_dimension(root_set, 3)
         gids = self.mb.tag_get_data(self.gid_tag, all_fine_vols, flat=True)
-
         map_global = dict(zip(all_fine_vols, gids))
 
+        # tools_c.set_lines(len(all_fine_vols), all_fine_vols, map_global, self.mb, self.mesh_topo_util, self.line_elems_tag, self.perm_tag, self.A, self.mi)
+
+
+        #
         for elem in all_fine_vols:
             # temp_k, temp_id = self.mount_lines_1(elem, map_global, flag = 1)
             temp_k = self.mount_lines_1(elem, map_global)
@@ -1544,18 +1558,43 @@ class StructuredMultiscaleMesh:
             self.mb.tag_set_data(self.line_elems_tag, elems, lines)
 
     def create_meshset_ams(self):
-        self.intern_volumes = list(self.intern_volumes - self.face_volumes)
-        self.face_volumes = list(self.face_volumes - self.edge_volumes)
-        self.edge_volumes = list(self.edge_volumes - self.vertex_volumes)
 
-        intern_volumes = self.mb.create_meshset()
-        face_volumes = self.mb.create_meshset()
-        edge_volumes = self.mb.create_meshset()
+        root_set = self.mb.get_root_set()
+        all_fine_vols = self.mb.get_entities_by_dimension(root_set, 3)
+        gids = self.mb.tag_get_data(self.gid_tag, all_fine_vols, flat=True)
+        map_global = dict(zip(all_fine_vols, gids))
 
-        self.mb.add_entities(intern_volumes, self.intern_volumes)
-        self.mb.add_entities(face_volumes, self.face_volumes)
-        self.mb.add_entities(edge_volumes, self.edge_volumes)
+        # self.intern_volumes = list(self.intern_volumes - self.face_volumes)
+        # self.face_volumes = list(self.face_volumes - self.edge_volumes)
+        # self.edge_volumes = list(self.edge_volumes - self.vertex_volumes)
+        # self.vertex_volumes = list(self.vertex_volumes)
+        #
+        # self.intern_volumes = sorted(self.intern_volumes, key = map_global.__getitem__)
+        # self.face_volumes = sorted(self.face_volumes, key = map_global.__getitem__)
+        # self.edge_volumes = sorted(self.edge_volumes, key = map_global.__getitem__)
+        # self.vertex_volumes = sorted(self.vertex_volumes, key = map_global.__getitem__)
 
-        self.mb.tag_set_data(self.intern_volumes_tag, 0, intern_volumes)
-        self.mb.tag_set_data(self.face_volumes_tag, 0, face_volumes)
-        self.mb.tag_set_data(self.edge_volumes_tag, 0, edge_volumes)
+        self.intern_volumes = sorted(list(self.intern_volumes - self.face_volumes), key = map_global.__getitem__)
+        self.face_volumes = sorted(list(self.face_volumes - self.edge_volumes), key = map_global.__getitem__)
+        self.edge_volumes = sorted(list(self.edge_volumes - self.vertex_volumes), key = map_global.__getitem__)
+        self.vertex_volumes = sorted(list(self.vertex_volumes), key = map_global.__getitem__)
+
+        # print(len(self.intern_volumes))
+        # print(len(self.face_volumes))
+        # print(len(self.edge_volumes))
+        # print(len(self.vertex_volumes))
+
+        intern_volumes_set = self.mb.create_meshset()
+        face_volumes_set = self.mb.create_meshset()
+        edge_volumes_set = self.mb.create_meshset()
+        vertex_volumes_set = self.mb.create_meshset()
+
+        self.mb.add_entities(intern_volumes_set, self.intern_volumes)
+        self.mb.add_entities(face_volumes_set, self.face_volumes)
+        self.mb.add_entities(edge_volumes_set, self.edge_volumes)
+        self.mb.add_entities(vertex_volumes_set, self.vertex_volumes)
+
+        self.mb.tag_set_data(self.intern_volumes_tag, 0, intern_volumes_set)
+        self.mb.tag_set_data(self.face_volumes_tag, 0, face_volumes_set)
+        self.mb.tag_set_data(self.edge_volumes_tag, 0, edge_volumes_set)
+        self.mb.tag_set_data(self.vertex_volumes_tag, 0, vertex_volumes_set)

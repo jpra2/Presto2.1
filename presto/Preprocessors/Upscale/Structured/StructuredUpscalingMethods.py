@@ -25,6 +25,8 @@ class StructuredUpscalingMethods:
         self.coarse_ratio = coarse_ratio
         self.mesh_size = mesh_size
         self.block_size = block_size
+        self.A = np.array([block_size[1]*block_size[2], block_size[0]*block_size[2], block_size[0]*block_size[1]])
+        self.mi = 1.0
         self.method = method
 
         self.verts = None  # Array containing MOAB vertex entities
@@ -143,6 +145,10 @@ class StructuredUpscalingMethods:
             "production_well_coarse", 1, types.MB_TYPE_INTEGER,
             types.MB_TAG_SPARSE, True)
 
+        self.line_elems_tag = self.mb.tag_get_handle(
+            "line_elems", 6, types.MB_TYPE_DOUBLE,
+            types.MB_TAG_SPARSE, True)
+
     def get_block_size_coarse(self):
         block_size_coarse = []
         total_size = (np.asarray(self.mesh_size, dtype='int32')) * np.asarray(
@@ -181,7 +187,7 @@ class StructuredUpscalingMethods:
         # TODO: - Should go on Common
         for dim in range(0, 3):
             self.primal_ids.append(
-                [i // (self.coarse_ratio[dim]) for i in xrange(
+                [i // (self.coarse_ratio[dim]) for i in range(
                         self.mesh_size[dim])])
 
         new_primal = []
@@ -258,9 +264,9 @@ class StructuredUpscalingMethods:
                           self.primal_ids[2]):
             # Flake8 bug
             print("{0} / {1}".format(k + 1, self.mesh_size[2]))
-            for j, idy in zip(xrange(self.mesh_size[1]),
+            for j, idy in zip(range(self.mesh_size[1]),
                               self.primal_ids[1]):
-                for i, idx in zip(xrange(self.mesh_size[0]),
+                for i, idx in zip(range(self.mesh_size[0]),
                                   self.primal_ids[0]):
 
                     hexa = self._create_hexa(i, j, k,
@@ -268,7 +274,7 @@ class StructuredUpscalingMethods:
                                              self.mesh_size)
                     el = self.mb.create_element(types.MBHEX, hexa)
 
-                    self.mb.tag_set_data(self.gid_tag, el, cur_id)
+                    # self.mb.tag_set_data(self.gid_tag, el, cur_id)
                     # Fine Global ID
                     self.mb.tag_set_data(self.gid_tag, el, cur_id)
                     # Fine Porosity
@@ -483,11 +489,11 @@ class StructuredUpscalingMethods:
                              )
         self.boundary_meshsets = {}
         for dim in range(0, 3):
-            for k, idz in zip(xrange(self.mesh_size[2]),
+            for k, idz in zip(range(self.mesh_size[2]),
                               self.primal_ids[2]):
-                for j, idy in zip(xrange(self.mesh_size[1]),
+                for j, idy in zip(range(self.mesh_size[1]),
                                   self.primal_ids[1]):
-                    for i, idx in zip(xrange(self.mesh_size[0]),
+                    for i, idx in zip(range(self.mesh_size[0]),
                                       self.primal_ids[0]):
                         el = self._get_elem_by_ijk((i, j, k))
                         if (i, j, k)[dim] == (self.coarse_ratio[dim] *
@@ -529,7 +535,7 @@ class StructuredUpscalingMethods:
     def set_global_problem(self):
         pass
 
-    def upscale_perm_flow_based(self, domain, dim, boundary_meshset):
+    def upscale_perm_flow_based(self, domain, dim, boundary_meshset, **options):
         self.average_method = 'flow-based'
         area = (self.block_size[1] * self.block_size[2],
                 self.block_size[0] * self.block_size[2],
@@ -540,6 +546,11 @@ class StructuredUpscalingMethods:
                    types.MB_TAG_SPARSE, True)
         std_map = Epetra.Map(len(domain), 0, self.comm)
         linear_vals = np.arange(0, len(domain))
+        if options.get('flag') == 1:
+            sz = len(domain)
+            trans_fine_local = np.zeros((sz, sz))
+        else:
+            trans_fine_local = options.get('trans_fine_local')
         id_map = dict(zip(domain, linear_vals))
         boundary_elms = set()
 
@@ -550,6 +561,13 @@ class StructuredUpscalingMethods:
 
         t0 = time.time()
         for elem in boundary_meshset:
+            if options.get('flag') == 1:
+                values, ids = self.mount_lines_1(elem, id_map, flag = 1)
+                idx = id_map[elem]
+                trans_fine_local[idx, ids] = values
+            else:
+                pass
+
             if elem in boundary_elms:
                 continue
             boundary_elms.add(elem)
@@ -560,6 +578,7 @@ class StructuredUpscalingMethods:
 
         self.mb.tag_set_data(pres_tag, domain, np.repeat(0.0, len(domain)))
         t1 = time.time()
+        """
         for elem in (set(domain) ^ boundary_elms):
 
             adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(
@@ -593,6 +612,24 @@ class StructuredUpscalingMethods:
             idx = id_map[elem]
             ids.append(idx)
             A.InsertGlobalValues(idx, values, ids)
+        """
+
+        ############################################
+        # Minha modificacao
+        for elem in (set(domain) ^ boundary_elms):
+            if options.get('flag') == 1:
+                values, ids = self.mount_lines_1(elem, id_map, flag = 1)
+                idx = id_map[elem]
+                trans_fine_local[idx, ids] = values
+                A.InsertGlobalValues(idx, values, ids)
+            else:
+                idx = id_map[elem]
+                ids = np.nonzero(trans_fine_local[idx])[0]
+                values = trans_fine_local[idx, ids]
+                A.InsertGlobalValues(idx, values, ids)
+
+        #############################################
+
         A.FillComplete()
         t2 = time.time()
 
@@ -636,7 +673,11 @@ class StructuredUpscalingMethods:
                 flow_rate = flow_rate + area[dim] * K_equiv * adj_pres / dl
                 total_area = total_area + area[dim]
             perm = flow_rate * dl / total_area
-        return perm
+
+        if options.get('flag') == 1:
+            return perm, trans_fine_local
+        else:
+            return perm
 
     def flow_based_coarse_perm(self):
 
@@ -656,8 +697,12 @@ class StructuredUpscalingMethods:
                                           primal_id, dim])
                 boundary = self.mb.get_entities_by_handle(np.asarray(
                            self.boundary_meshsets[primal_id, dim]))
-                perm = self.upscale_perm_flow_based(fine_elems_in_primal, dim,
-                                                    boundary)
+                if dim == 0:
+                    perm, trans_fine = self.upscale_perm_flow_based(fine_elems_in_primal, dim,
+                                                    boundary, flag = 1)
+                else:
+                    perm = self.upscale_perm_flow_based(fine_elems_in_primal, dim,
+                                                    boundary, trans_fine_local = trans_fine)
                 self.mb.tag_set_data(self.primal_perm[dim], primal, perm)
 
     def coarse_grid(self):
@@ -835,3 +880,95 @@ class StructuredUpscalingMethods:
 
     def export(self, outfile):
         self.mb.write_file(outfile)
+
+    def kequiv(self,k1,k2):
+        """
+        obbtem o k equivalente entre k1 e k2
+        """
+        #keq = ((2*k1*k2)/(h1*h2))/((k1/h1) + (k2/h2))
+        keq = (2*k1*k2)/(k1+k2)
+
+        return keq
+
+    def unitary(self,l):
+        """
+        obtem o vetor unitario positivo da direcao de l
+
+        """
+        uni = l/np.linalg.norm(l)
+        uni = uni*uni
+
+        return uni
+
+    def mount_lines_1(self, volume, map_local, **options):
+        """
+        monta as linhas da matriz
+        retorna o valor temp_k e o mapeamento temp_id
+        map_id = mapeamento dos elementos
+
+        flag == 1 faz verificacao do mapeamento local
+        flag == 2 nao precisa fazer verificacao do mapeamento local, pode ser
+                usado para calculo da transmissiblidade da malha fina, mas ainda assim,
+                nesse caso requer o mapeamento global
+        flag == None calcula as permeabilidades equivalentes nas interfaces \
+                usado apenas para 'setar' a permeabilidade eq no inicio,
+                mais especificamente na funcao def set_lines_elems()
+        """
+        #0
+
+        if options.get('flag') == 1:
+            values = self.mb.tag_get_data(self.line_elems_tag, elem, flat=True)
+            loc = np.where(values != 0)
+            values = values[loc].copy()
+            all_adjs = self.mesh_topo_util.get_bridge_adjacencies(elem, 2, 3)
+            map_values = dict(zip(all_adjs, values))
+            local_elems = [i for i in all_adjs if i in map_local.keys()]
+            values = [map_values[i] for i in local_elems]
+            local_elems.append(elem)
+            values.append(-sum(values))
+            ids = [map_local[i] for i in local_elems]
+            return values, ids
+        elif options.get('flag') == 2:
+            values = self.mb.tag_get_data(self.line_elems_tag, elem, flat=True)
+            loc = np.where(values != 0)
+            values = values[loc].copy()
+            local_elems = self.mesh_topo_util.get_bridge_adjacencies(elem, 2, 3)
+            local_elems.append(elem)
+            values.append(-sum(values))
+            ids = [map_local[i] for i in local_elems]
+            return values, ids
+        else:
+            lim = 1e-7
+            cont = 0
+            volume_centroid = self.mesh_topo_util.get_average_position([volume])
+            adj_volumes = self.mesh_topo_util.get_bridge_adjacencies(volume, 2, 3)
+            temp_k = []
+            for adj in adj_volumes:
+                #1
+                cont += 1
+                kvol = self.mb.tag_get_data(self.perm_tag, volume).reshape([3, 3])
+                adj_centroid = self.mesh_topo_util.get_average_position([adj])
+                direction = adj_centroid - volume_centroid
+                uni = self.unitary(direction)
+                kvol = np.dot(np.dot(kvol,uni),uni)
+                kadj = self.mb.tag_get_data(self.perm_tag, adj).reshape([3, 3])
+                kadj = np.dot(np.dot(kadj,uni),uni)
+                keq = self.kequiv(kvol, kadj)
+                keq = keq*(np.dot(self.A, uni))/float(abs(self.mi*np.dot(direction, uni)))
+                temp_k.append(-keq)
+
+            line = np.zeros(6)
+            line[0:cont] = temp_k
+            return line
+
+    def set_lines_elems(self):
+        # root_set = self.mb.get_root_set()
+        all_fine_vols = self.mb.get_entities_by_dimension(self.root_set, 3)
+        gids = self.mb.tag_get_data(self.gid_tag, all_fine_vols, flat=True)
+
+        map_global = dict(zip(all_fine_vols, gids))
+
+        for elem in all_fine_vols:
+            # temp_k, temp_id = self.mount_lines_1(elem, map_global, flag = 1)
+            temp_k = self.mount_lines_1(elem, map_global)
+            self.mb.tag_set_data(self.line_elems_tag, elem, temp_k)

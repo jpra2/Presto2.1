@@ -10,7 +10,7 @@ import shutil
 import random
 import sys
 import configparser
-import cython
+
 
 
 class MsClassic_mono:
@@ -71,10 +71,10 @@ class MsClassic_mono:
         # self.set_volumes_in_interface()
 
         if ind == False:
-            self.map_all_fine_vols = dict(zip(self.all_fine_vols, gids))
+            # self.map_all_fine_vols = dict(zip(self.all_fine_vols, gids))
             self.calculate_restriction_op()
             # self.run()
-            self.run_3()
+            # self.run_3()
             # self.run_4()
 
         else:
@@ -1900,6 +1900,10 @@ class MsClassic_mono:
         # self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
         self.perm_tag = mb.tag_get_handle("PERM")
         self.line_elems_tag = self.mb.tag_get_handle("LINE_ELEMS")
+        self.intern_volumes_tag = self.mb.tag_get_handle("INTERN_VOLUMES")
+        self.face_volumes_tag = self.mb.tag_get_handle("FACE_VOLUMES")
+        self.edge_volumes_tag = self.mb.tag_get_handle("EDGE_VOLUMES")
+        self.vertex_volumes_tag = self.mb.tag_get_handle("VERTEX_VOLUMES")
 
     def erro(self):
         for volume in self.all_fine_vols:
@@ -2100,7 +2104,7 @@ class MsClassic_mono:
         obbtem o k equivalente entre k1 e k2
 
         """
-        #keq = ((2*k1*k2)/(h1*h2))/((k1/h1) + (k2/h2))
+        # keq = ((2*k1*k2)/(h1*h2))/((k1/h1) + (k2/h2))
         keq = (2*k1*k2)/(k1+k2)
 
         return keq

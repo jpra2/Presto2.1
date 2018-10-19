@@ -30,7 +30,7 @@ production_sets = mb.get_entities_by_type_and_tag(
 
 tag2injection_well = {}
 tag2production_well = {}
-print "Saving tags..."
+print("Saving tags...")
 for tag in injection_sets:
     tag_id = mb.tag_get_data(injection_tag, np.array([tag]), flat=True)
     elems = mb.get_entities_by_handle(tag, True)
@@ -70,7 +70,7 @@ b = Epetra.Vector(std_map)
 x = Epetra.Vector(std_map)
 mb.tag_set_data(pres_tag, volumes, np.asarray(b))
 
-print "Filling matrix..."
+print("Filling matrix...")
 t0 = time.time()
 count = 0
 percent = 0
@@ -79,7 +79,7 @@ for idx, elem in zip(v_ids, volumes):
     count += 1
     if count == (len(volumes) / 100):
         percent += 1
-        print percent, "%"
+        print(percent, "%")
         count = 0
 
     adj_volumes = mesh_topo_util.get_bridge_adjacencies(
@@ -136,7 +136,7 @@ for idx, elem in zip(v_ids, volumes):
         #print idx, ids, values
 A.FillComplete()
 
-print "Matrix fill took", time.time() - t0, "seconds... Ran over ", len(volumes), "elems"
+print("Matrix fill took", time.time() - t0, "seconds... Ran over ", len(volumes), "elems")
 
 mb.tag_set_data(pres_tag, volumes, np.asarray(b[v_ids]))
 
@@ -153,12 +153,12 @@ linearProblem = Epetra.LinearProblem(A, x, b)
 if USE_DIRECT_SOLVER:
     solver = Amesos.Lapack(linearProblem)
 
-    print "1) Performing symbolic factorizations..."
+    print("1) Performing symbolic factorizations...")
     solver.SymbolicFactorization()
 
-    print "2) Performing numeric factorizations..."
+    print("2) Performing numeric factorizations...")
     solver.NumericFactorization()
-    print "3) Solving the linear system..."
+    print("3) Solving the linear system...")
     ierr = solver.Solve()
 else:
 
@@ -166,15 +166,15 @@ else:
 
     ierr = solver.Iterate(1000, 1e-9)
 
-print "   solver.Solve() return code = ", ierr
+print("   solver.Solve() return code = ", ierr)
 
 if ierr <= 1e-9:
 
-    print
-    print "|--------------------|"
-    print "|convergence achieved|"
-    print "|--------------------|"
-    print
+    print('\n')
+    print("|--------------------|")
+    print("|convergence achieved|")
+    print("|--------------------|")
+    print('\n')
 
 mb.tag_set_data(pres_tag, volumes, np.asarray(x[v_ids]))
 

@@ -61,6 +61,14 @@ class Preprocessor(object):
         self.SUM.create_fine_blocks_and_primal()
         print("took {0}".format(time.time()-t0), "seconds...")
 
+        ###################################
+        # Adicionei
+        print("Setting lines elems...")
+        t0 = time.time()
+        self.SUM.set_lines_elems()
+        print("took {0}".format(time.time()-t0), "seconds...")
+        ####################################
+
         if self.fine_grid_construct == 'fine_grid':
             print("exporting fine scale mesh")
             t0 = time.time()

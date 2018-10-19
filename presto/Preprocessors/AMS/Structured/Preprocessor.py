@@ -3,7 +3,7 @@ import time
 import sys
 import cProfile as cp
 
-from .StructuredMultiscaleMesh import StructuredMultiscaleMesh
+from .Structured_AMS_Mesh import Structured_AMS_Mesh
 
 
 class Preprocessor(object):
@@ -128,7 +128,7 @@ class Preprocessor(object):
             sys.exit(0)
 
 
-        self.smm = StructuredMultiscaleMesh(
+        self.smm = Structured_AMS_Mesh(
             self.coarse_ratio, self.mesh_size, self.block_size, self.wells, self.prop)
 
     def run(self, moab):

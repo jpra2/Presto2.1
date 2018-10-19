@@ -19,12 +19,15 @@ chamada12 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 
 chamada13 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_mono_faces.py\"'
 chamada14 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_mono_faces_gr.py\"'
 chamada15 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_bif_2.py\"'
+chamada16 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python simulation_bif_2_gr.py\"'
 
 # windows
 chamada20 = 'docker run -t -it -v /c/Users/jp/Documents/git/local/Presto2:/elliptic padmec/elliptic:1.0 bash -c \"cd /elliptic; python -m  structured.cfg\"'
 chamada21 = 'docker run -t -it -v $PWD:/elliptic presto bash -c \"cd /elliptic; python -m elliptic.Preprocess structured.cfg\"'
 
 chamada22 = 'sudo docker run -it -v $PWD:/elliptic presto bash -c \"cd /elliptic; python -m elliptic.Preprocess structured.cfg\"'
+chamada23 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python AMS_SOLVER/tools_cy_py/setup.py\"'
+chamada24 = 'sudo docker run -it -v $PWD:/elliptic padmec/pymoab-pytrilinos:3.6 bash -c \"cd /elliptic; python AMS_SOLVER/simulation_AMS.py\"'
 
 """
 sudo docker run -it -v $PWD:/elliptic presto bash -c "cd /elliptic; python -m elliptic.Preprocess structured.cfg"
@@ -49,15 +52,35 @@ l6 = [chamada11, chamada5]
 l7 = [chamada11, chamada13] # monofasico por faces
 l8 = [chamada11, chamada14] # monofasico por elemento com gravidade
 l9 = [chamada11, chamada15] # bifasico sem gravidade por elemento
+l10 = [chamada11, chamada24] # ams_monofasico
+
+l12 = [chamada11, chamada16] # bifasico com gravidade por elemento
 
 
-# os.chdir(principal)
+
 # os.system(chamada5)
 #
-for i in l9:
-    os.system(i)
+# import pdb; pdb.set_trace()
 
-# os.system(chamada15)
+
+# c1 = '/home/joao/Dropbox/git/Presto2.2_proj2/AMS_SOLVER/tools_cy_py'
+# c2 = '/home/joao/Dropbox/git/Presto2.2_proj2/presto/Preprocessors/AMS/Structured/tools_cy_py'
+# c3 = '/home/joao/Dropbox/git/Presto2.2_proj2'
+# set = 'python setup.py build_ext --inplace'
+#
+# cc = [c1, c2]
+
+# for i in cc:
+#     os.chdir(i)
+#     os.system(set)
+#
+# os.chdir(c3)
+
+#
+# for i in l12:
+#     os.system(i)
+
+os.system(chamada16)
 
 
 
