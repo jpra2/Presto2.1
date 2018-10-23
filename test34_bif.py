@@ -52,7 +52,7 @@ class Msclassic_bif:
         self.gama_o = self.mb.tag_get_data(self.gamao_tag, elem0, flat=True)[0] # peso especifico do oleo
         self.gama_ = self.gama_w + self.gama_o
         self.gama = self.gama_
-        
+
 
 
         self.nw = self.mb.tag_get_data(self.nw_tag, elem0, flat=True)[0] # expoente da agua para calculo da permeabilidade relativa

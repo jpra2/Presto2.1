@@ -77,10 +77,10 @@ l12 = [chamada11, chamada16] # bifasico com gravidade por elemento
 # os.chdir(c3)
 
 #
-# for i in l12:
-#     os.system(i)
+for i in l12:
+    os.system(i)
 
-os.system(chamada16)
+# os.system(chamada16)
 
 
 
