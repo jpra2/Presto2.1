@@ -15,7 +15,8 @@ from ams1 import AMS_mono
 def run1():
     t0 = time.time()
     sim1 = AMS_mono()
-    sim1.run_AMS()
+    # sim1.run_AMS()
+    sim1.run_AMS_numpy()
     t1 = time.time()
     print('took: {0}'.format(t1 - t0))
 

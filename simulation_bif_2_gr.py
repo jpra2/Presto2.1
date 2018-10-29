@@ -517,7 +517,7 @@ class Msclassic_bif_2_gr(Msclassic_bif):
         soma_inj = 0
         soma_prod = 0
         lim = 1e-4
-        lim2 = 1e-8
+        lim2 = 1e-6
         self.dfdsmax = 0
         self.fimin = 10
         self.qmax = 0
@@ -1550,7 +1550,7 @@ class Msclassic_bif_2_gr(Msclassic_bif):
         self.qpms_coarse_2 = qpms_coarse_2
 
     def verif_op(self):
-        lim = 1e-8
+        lim = 1e-6
         for i in range(self.nf):
             p = self.trilOP.ExtractGlobalRowCopy(i)
             if (sum(p[0]) > 1.0 + lim) or (sum(p[0]) < 1.0 - lim):
@@ -1624,6 +1624,7 @@ class Msclassic_bif_2_gr(Msclassic_bif):
         ############################################
 
     def run_bif_sol_multi(self):
+        print('foi')
         t0 = time.time()
         os.chdir(self.caminho1)
         t_ = 0.0
@@ -1637,7 +1638,7 @@ class Msclassic_bif_2_gr(Msclassic_bif):
 
         self.calculate_restriction_op_2()
         self.calculate_prolongation_op_het_elem_bif_gr()
-        self.verif_op()
+        # self.verif_op()
         self.organize_op()
         self.Tc = self.modificar_matriz(self.pymultimat(self.pymultimat(
         self.trilOR, self.trans_fine, self.nf_ic), self.trilOP, self.nf_ic), self.nc, self.nc)
@@ -1667,7 +1668,10 @@ class Msclassic_bif_2_gr(Msclassic_bif):
         t_ = t_ + self.delta_t
         self.tempo = t_
 
+
+
         while t_ <= self.t and self.loop <= self.loops:
+            print('foi')
             self.prod_w = []
             self.prod_o = []
             self.calculate_sat_3()
@@ -1675,7 +1679,7 @@ class Msclassic_bif_2_gr(Msclassic_bif):
             self.set_global_problem_vf_5_gr(flux_fine = self.store_flux_pms)
 
             self.calculate_prolongation_op_het_elem_2_bif_gr()
-            self.verif_op()
+            # self.verif_op()
             self.organize_op()
             self.Tc = self.modificar_matriz(self.pymultimat(self.pymultimat(
             self.trilOR, self.trans_fine, self.nf_ic), self.trilOP, self.nf_ic), self.nc, self.nc)
@@ -1704,6 +1708,7 @@ class Msclassic_bif_2_gr(Msclassic_bif):
             self.loop += 1
             t_ = t_ + self.delta_t
             self.tempo = t_
+
 
         shutil.copytree(self.caminho1, self.pasta)
 

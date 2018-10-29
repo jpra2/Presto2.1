@@ -104,14 +104,14 @@ class AMS_mono:
         self.map_vols_ic_wirebasket = dict(zip(self.all_fine_vols_ic_wirebasket, range(self.nf_ic)))
         self.map_vols_ic_wirebasket_2 = dict(zip(range(self.nf_ic), self.all_fine_vols_ic_wirebasket))
 
-        self.permutation_matrix_1()
+
 
         os.chdir(caminho_AMS)
 
     def calculate_restriction_op(self):
 
         std_map = Epetra.Map(len(self.all_fine_vols), 0, self.comm)
-        self.trilOR = Epetra.CrsMatrix(Epetra.Copy, std_map, 3)
+        trilOR = Epetra.CrsMatrix(Epetra.Copy, std_map, 3)
 
         for primal in self.primals:
 
@@ -129,17 +129,20 @@ class AMS_mono:
                 np.repeat(primal_id, len(fine_elems_in_primal)))
 
             gids = self.mb.tag_get_data(self.global_id_tag, fine_elems_in_primal, flat=True)
-            self.trilOR.InsertGlobalValues(primal_id, np.repeat(1, len(gids)), gids)
+            trilOR.InsertGlobalValues(primal_id, np.repeat(1, len(gids)), gids)
 
             self.mb.tag_set_data(restriction_tag, fine_elems_in_primal, np.repeat(1, len(fine_elems_in_primal)))
 
-        self.trilOR.FillComplete()
+        trilOR.FillComplete()
+
 
         """for i in range(len(primals)):
             p = trilOR.ExtractGlobalRowCopy(i)
             print(p[0])
             print(p[1])
             print('\n')"""
+
+        return trilOR
 
     def create_tags(self, mb):
 
@@ -211,9 +214,9 @@ class AMS_mono:
                         "PMS", 1, types.MB_TYPE_DOUBLE,
                         types.MB_TAG_SPARSE, True)
 
-        # self.pms2_tag = mb.tag_get_handle(
-        #                 "PMS2", 1, types.MB_TYPE_DOUBLE,
-        #                 types.MB_TAG_SPARSE, True)
+        self.pms2_tag = mb.tag_get_handle(
+                        "PMS2", 1, types.MB_TYPE_DOUBLE,
+                        types.MB_TAG_SPARSE, True)
 
         # self.pms3_tag = mb.tag_get_handle(
         #                 "PMS3", 1, types.MB_TYPE_DOUBLE,
@@ -271,6 +274,39 @@ class AMS_mono:
         self.edge_volumes_tag = self.mb.tag_get_handle("EDGE_VOLUMES")
         self.vertex_volumes_tag = self.mb.tag_get_handle("VERTEX_VOLUMES")
 
+    def convert_matrix_to_numpy(self, M, rows, cols):
+        A = np.zeros((rows,cols), dtype='float64')
+        for i in range(rows):
+            p = M.ExtractGlobalRowCopy(i)
+            if len(p[1]) > 0:
+                A[i, p[1]] = p[0]
+
+        return A
+
+    def convert_matrix_to_trilinos(self, M, n):
+        """
+        retorna uma matriz quadrada nxn
+        n = numero de linhas da matriz do numpy
+        """
+
+        std_map = Epetra.Map(n, 0, self.comm)
+        A = Epetra.CrsMatrix(Epetra.Copy, std_map, 3)
+
+        for i in range(n):
+            p = np.nonzero(M[i])[0].astype(np.int32)
+            if len(p) > 0:
+                A.InsertGlobalValues(i,M[i,p],p)
+
+        return A.FillComplete()
+
+    def convert_vector_to_trilinos(self, v, n):
+        std_map = Epetra.Map(n, 0, self.comm)
+        b = Epetra.Vector(std_map)
+
+        b[:] = v[:]
+
+        return b
+
     def debug_matrix(self, M, n, **options):
 
 
@@ -295,15 +331,6 @@ class AMS_mono:
         print('saiu do debug')
         import pdb; pdb.set_trace()
         print('\n')
-
-    def convert_matrix_to_numpy(self, M, n):
-        A = np.zeros((n,n), dtype='float64')
-        for i in range(n):
-            p = M.ExtractGlobalRowCopy(i)
-            if len(p[1]) > 0:
-                A[i, p[1]] = p[0]
-
-        return A
 
     def Eps_matrix(self, map_global):
         lim = 1e-9
@@ -385,6 +412,10 @@ class AMS_mono:
 
         return E
 
+    def erro(self):
+        err = 100*abs((self.Pf - self.Pms)/self.Pf)
+        self.mb.tag_set_data(self.err_tag, self.all_fine_vols, err)
+
     def calculate_prolongation_op_het_faces(self):
 
         zeros = np.zeros(len(self.all_fine_vols))
@@ -455,6 +486,56 @@ class AMS_mono:
 
         #self.trilOP.FillComplete()
 
+    def get_B_matrix_numpy(self, total_source, grav_source, nt):
+
+        all_elems = self.elems_wirebasket
+        lim = 1e-8
+
+        B = np.zeros((nt, nt), dtype='float64')
+
+        for i in range(nt):
+            elem = all_elems[i]
+            if abs(total_source[i]) < lim or abs(grav_source[i]) < lim or elem in self.wells_d:
+                continue
+
+
+            bii = grav_source[i]/total_source[i]
+            B[i,i] = bii
+
+        return B
+
+    def get_C_matrix(self, trans_mod, E, G):
+        C = np.zeros((self.nf, self.nf), dtype='float64')
+
+        idsi = self.nni
+        idsf = idsi + self.nnf
+        idse = idsf + self.nne
+        idsv = idse + self.nnv
+
+        C[0:idsi, 0:idsi] = np.linalg.inv(trans_mod[0:idsi, 0:idsi])
+        C[idsi:idsf, idsi:idsf] = np.linalg.inv(trans_mod[idsi:idsf, idsi:idsf])
+        C[idsf:idse, idsf:idse] = np.linalg.inv(trans_mod[idsf:idse, idsf:idse])
+        C[0:idsi, idsi:idsf] = -np.dot(C[0:idsi, 0:idsi], np.dot(trans_mod[0:idsi, idsi:idsf], C[idsi:idsf, idsi:idsf]))
+        C[idsi:idsf, idsf:idse] = -np.dot(C[idsi:idsf, idsi:idsf], np.dot(trans_mod[idsi:idsf, idsf:idse], C[idsf:idse, idsf:idse]))
+        C[0:idsi, idsf:idse] = -np.dot(C[0:idsi, 0:idsi], np.dot(trans_mod[0:idsi, idsi:idsf], C[idsi:idsf, idsf:idse]))
+
+        C = np.dot(G.T, np.dot(E, G))
+
+        return C
+
+    def get_G_matrix_numpy(self):
+        """
+        G eh a matriz permutacao
+        """
+
+        global_map = list(range(self.nf))
+        wirebasket_map = [self.map_global[i] for i in self.elems_wirebasket]
+        G = np.zeros((self.nf, self.nf), dtype='float64')
+
+        G[global_map, wirebasket_map] = np.ones(self.nf, dtype=np.int)
+
+        return G
+
     def get_local_matrix(self, global_matrix, id_rows, id_cols, tam):
         rows = len(id_rows)
         cols = len(id_cols)
@@ -473,6 +554,9 @@ class AMS_mono:
             cont += 1
 
         return A
+
+    def get_local_matrix_numpy(self, matrix, id1_row, id2_row, id1_col, id2_col):
+        return matrix[id1_row : id2_row, id1_col : id2_col]
 
     def get_negative_matrix(self, matrix, n):
         std_map = Epetra.Map(n, 0, self.comm)
@@ -508,6 +592,37 @@ class AMS_mono:
 
         OP.FillComplete()
         return OP
+
+    def get_OP_numpy(self):
+
+        OP = np.empty((self.nf, self.nc))
+
+        idsi = self.nni
+        idsf = self.nni+self.nnf
+        idse = idsf+self.nne
+        idsv = idse+self.nnv
+
+        OP[idse:idsv] = np.identity(self.nnv)
+
+        OP[idsf:idse] = -np.dot(np.linalg.inv(self.trans_mod[idsf:idse, idsf:idse]), self.trans_mod[idsf:idse, idse:idsv])
+        OP[idsi:idsf] = -np.dot(np.dot(np.linalg.inv(self.trans_mod[idsi:idsf, idsi:idsf]), self.trans_mod[idsi:idsf, idsf:idse]), OP[idsf:idse])
+        OP[0:idsi] = -np.dot(np.dot(np.linalg.inv(self.trans_mod[0:idsi, 0:idsi]), self.trans_mod[0:idsi, idsi:idsf]), OP[idsi:idsf])
+
+        # for elem in self.wells_d:
+        #     idx = self.map_wirebasket[elem]
+        #     temp = np.zeros(self.nc, dtype='float64')
+        #     primal = self.mb.tag_get_data(self.fine_to_primal_tag, elem, flat=True)[0]
+        #     primal_id = self.mb.tag_get_data(self.primal_id_tag, primal, flat=True)[0]
+        #     temp[primal_id] = 1.0
+        #     OP[idx] = temp[:]
+
+
+        OP = np.dot(self.G.T, OP)
+
+        return OP
+
+    def get_tag(self, tag, elem):
+        return self.mb.tag_get_data(tag, elem)
 
     def get_wells_gr(self):
         """
@@ -579,6 +694,33 @@ class AMS_mono:
         self.trans_mod = tools_c.mod_transfine(self.nf, self.comm, self.trans_fine_wirebasket, self.intern_elems, self.face_elems, self.edge_elems, self.vertex_elems)
         # self.trans_mod = self.mod_transfine_2(self.nf, self.comm, self.trans_fine_wirebasket, self.intern_elems, self.face_elems, self.edge_elems, self.vertex_elems)
 
+    def mod_transfine_numpy(self, trans_fine_wirebasket):
+        """
+        Modificacao da transmissibilidade da malha fina
+        retirando a influencia dos vizinhos
+        """
+
+        ni = len(self.intern_elems)
+        nf = len(self.face_elems)
+        ne = len(self.edge_elems)
+        nv = len(self.vertex_elems)
+        self.nni = ni
+        self.nnf = nf
+        self.nne = ne
+        self.nnv = nv
+
+        trans_mod = trans_fine_wirebasket.copy()
+
+        trans_mod[ni:ni+nf, ni:ni+nf] = trans_mod[ni:ni+nf, ni:ni+nf] + np.diag(np.sum(trans_mod[ni:ni+nf, 0:ni], axis=1))
+        trans_mod[ni+nf:ni+nf+ne, ni+nf:ni+nf+ne] = trans_mod[ni+nf:ni+nf+ne, ni+nf:ni+nf+ne] + np.diag(np.sum(trans_mod[ni+nf:ni+nf+ne, ni:ni+nf], axis=1))
+
+        trans_mod[ni:ni+nf, 0:ni] = np.zeros((nf, ni))
+        trans_mod[ni+nf:ni+nf+ne, ni:ni+nf] = np.zeros((ne, nf))
+        trans_mod[ni+nf+ne:ni+nf+ne+nv, ni+nf:ni+nf+ne] = np.zeros((nv, ne))
+        trans_mod[ni+nf+ne:ni+nf+ne+nv, ni+nf+ne:ni+nf+ne+nv] = np.identity(nv)
+
+        return trans_mod
+
     def mod_transfine_2(self, n, comm, trans_fine, intern_elems, face_elems, edge_elems, vertex_elems):
 
       ni = len(intern_elems)
@@ -620,6 +762,15 @@ class AMS_mono:
         trans_mod.SumIntoGlobalValues(i, [somar], [i])
 
       return trans_mod
+
+    def modif_OP_C(self):
+        temp1 = np.zeros(self.nf, dtype='float64')
+        temp2 = np.zeros(self.nc, dtype='float64')
+        for elem in self.wells_d:
+            idx = self.map_global[elem]
+            self.C[idx] = temp1.copy()
+            self.C[idx, idx] = 1.0
+            self.OP[idx] = temp2.copy()
 
     def mount_lines_3(self, elem, map_local, **options):
         """
@@ -679,7 +830,7 @@ class AMS_mono:
         # local_elems = [i for i in all_adjs if i in map_local.keys()]
         # values = [map_values[i] for i in local_elems]
         # zs = [map_z_adjs[i] for i in local_elems]
-        gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
+        # gid = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
         local_elems.append(elem)
         values.append(-sum(values))
         zs.append(z_elem)
@@ -750,6 +901,36 @@ class AMS_mono:
         #temp_ps.append(pvol)
 
         return temp_k, temp_ids, temp_hs, temp_kgr
+
+    def organize_OP_numpy(self, OP):
+        # OP2 = np.zeros((self.nf_ic, self.nc), dtype='float64')
+
+        gids_vols_ic = self.mb.tag_get_data(self.global_id_tag, self.all_fine_vols_ic, flat=True)
+        # map_vols_ic_gids = dict(zip(self.all_fine_vols_ic, gids_vols_ic))
+        OP2 = OP[gids_vols_ic]
+
+        return OP2
+
+    def organize_OR_numpy(self, OR):
+        gids_vols_ic = self.mb.tag_get_data(self.global_id_tag, self.all_fine_vols_ic, flat=True)
+        # map_vols_ic_gids = dict(zip(self.all_fine_vols_ic, gids_vols_ic))
+        OR2 = OR[:, gids_vols_ic]
+
+        return OR2
+
+    def organize_Pf_numpy(self, Pf):
+        Pf2 = np.empty(self.nf, dtype='float64')
+        gids_vols_ic = self.mb.tag_get_data(self.global_id_tag, self.all_fine_vols_ic, flat=True)
+        # map_vols_ic_gids = dict(zip(self.all_fine_vols_ic, gids_vols_ic))
+        dict_wells_d = dict(zip(self.wells_d, self.set_p))
+
+        Pf2[gids_vols_ic] = Pf
+
+        for elem in self.wells_d:
+            gid_elem = self.mb.tag_get_data(self.global_id_tag, elem, flat=True)[0]
+            Pf2[gid_elem] = dict_wells_d[elem]
+
+        return Pf2
 
     def permutation_matrix_1(self):
         """
@@ -932,6 +1113,133 @@ class AMS_mono:
 
         return trans_fine, b, s
 
+    def set_global_problem_AMS_gr_numpy(self, map_global):
+        """
+        transmissibilidade da malha fina
+        obs: com funcao para obter dados dos elementos
+        """
+        #0
+        dict_wells_n = dict(zip(self.wells_n, self.set_q))
+        dict_wells_d = dict(zip(self.wells_d, self.set_p))
+
+        trans_fine = np.zeros((self.nf, self.nf), dtype='float64')
+        b = np.zeros(self.nf, dtype='float64')
+        s = b.copy()
+        for volume in set(self.all_fine_vols) - set(self.wells_d):
+            #1
+            temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
+            trans_fine[map_global[volume], temp_glob_adj] = temp_k
+            b[map_global[volume]] += source_grav
+            s[map_global[volume]] = source_grav
+            if volume in self.wells_n:
+                #2
+                if volume in self.wells_inj:
+                    #3
+                    b[map_global[volume]] += dict_wells_n[volume]
+                #2
+                else:
+                    #3
+                    b[map_global[volume]] += -dict_wells_n[volume]
+        #0
+        for volume in self.wells_d:
+            #1
+            # temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
+            # self.mb.tag_set_data(self.flux_coarse_tag, volume, source_grav)
+            trans_fine[map_global[volume], map_global[volume]] = 1.0
+            b[map_global[volume]] = dict_wells_d[volume]
+
+        return trans_fine, b, s
+
+    def set_global_problem_AMS_gr_numpy_vols_ic(self, map_global):
+        """
+        transmissibilidade da malha fina
+        obs: com funcao para obter dados dos elementos
+        exclui os volumes com pressao prescrita
+        """
+        #0
+        dict_wells_n = dict(zip(self.wells_n, self.set_q))
+        dict_wells_d = dict(zip(self.wells_d, self.set_p))
+
+        trans_fine = np.zeros((self.nf, self.nf), dtype='float64')
+        b = np.zeros(self.nf, dtype='float64')
+        s = b.copy()
+        for volume in set(self.all_fine_vols) - set(self.wells_d):
+            #1
+            temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
+            trans_fine[map_global[volume], temp_glob_adj] = temp_k
+            b[map_global[volume]] += source_grav
+            s[map_global[volume]] = source_grav
+            if volume in self.wells_n:
+                #2
+                if volume in self.wells_inj:
+                    #3
+                    b[map_global[volume]] += dict_wells_n[volume]
+                #2
+                else:
+                    #3
+                    b[map_global[volume]] += -dict_wells_n[volume]
+        #0
+        for volume in self.wells_d:
+            #1
+            # temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
+            # self.mb.tag_set_data(self.flux_coarse_tag, volume, source_grav)
+            trans_fine[map_global[volume], map_global[volume]] = 1.0
+            b[map_global[volume]] = dict_wells_d[volume]
+
+        return trans_fine, b, s
+
+    def set_global_problem_AMS_gr_numpy_to_OP(self, map_global):
+        """
+        transmissibilidade da malha fina
+        obs: com funcao para obter dados dos elementos
+        """
+        #0
+        dict_wells_n = dict(zip(self.wells_n, self.set_q))
+        dict_wells_d = dict(zip(self.wells_d, self.set_p))
+
+        trans_fine = np.zeros((self.nf, self.nf), dtype='float64')
+        b = np.zeros(self.nf, dtype='float64')
+        s = b.copy()
+        for volume in set(self.all_fine_vols):
+            #1
+            temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
+            trans_fine[map_global[volume], temp_glob_adj] = temp_k
+            b[map_global[volume]] += source_grav
+            s[map_global[volume]] = source_grav
+            if volume in self.wells_n:
+                #2
+                if volume in self.wells_inj:
+                    #3
+                    b[map_global[volume]] += dict_wells_n[volume]
+                #2
+                else:
+                    #3
+                    b[map_global[volume]] += -dict_wells_n[volume]
+        #0
+        # for volume in self.wells_d:
+        #     #1
+        #     # temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
+        #     # self.mb.tag_set_data(self.flux_coarse_tag, volume, source_grav)
+        #     trans_fine[map_global[volume], map_global[volume]] = 1.0
+        #     b[map_global[volume]] = dict_wells_d[volume]
+
+        return trans_fine, b, s
+
+    def set_OP(self, OP):
+        all_fine_vols = np.array(self.all_fine_vols)
+        lim = 1e-6
+        sz = OP.shape[1]
+        for i in range(sz):
+            support_vals_tag = self.mb.tag_get_handle(
+                "TMP_SUPPORT_VALS {0}".format(i), 1, types.MB_TYPE_DOUBLE, True,
+                types.MB_TAG_SPARSE, default_value=0.0)
+
+            p = np.nonzero(OP[:,i])[0]
+            elems = all_fine_vols[p]
+            all_values = OP[:,i]
+            values = all_values[p]
+            self.mb.tag_set_data(support_vals_tag, elems, values)
+
     def solve_linear_problem(self, A, b, n):
 
         std_map = Epetra.Map(n, 0, self.comm)
@@ -944,6 +1252,45 @@ class AMS_mono:
         solver.Iterate(10000, 1e-14)
 
         return x
+
+    def solve_Pms_iter(self, M, b, its, err, P1, A):
+
+        err2 = 10.0
+        cont = 0
+        while(its > cont and err2 > err):
+            import pdb; pdb.set_trace()
+            P2 = P1 + np.dot(M, b - np.dot(A, P1))
+            err2 = max(list(map(abs, P2 - P1)))
+            P1 = P2
+            cont += 1
+
+        return P2
+
+    def solve_Pms_1(self, trans_fine, b):
+        dict_wells_d = dict(zip(self.wells_d, self.set_p))
+        Tc = np.dot(np.dot(self.OR, trans_fine), self.OP)
+
+        Qc = np.dot(self.OR, b)
+
+        Pc = np.linalg.solve(Tc, Qc)
+
+        Pms = np.dot(self.OP, Pc)
+        # for elem in self.wells_d:
+        #     idx = self.map_global[elem]
+        #     Pms[idx] = dict_wells_d[elem]
+
+
+        return Pms
+
+    def test_OP_numpy(self):
+
+        I1 = np.sum(self.OP, axis=1)
+        verif = np.allclose(I1, np.ones(self.nf))
+        try:
+            assert verif == True
+        except AssertionError:
+            print('o Operador de prolongamento nao esta dando unitario')
+            import pdb; pdb.set_trace()
 
     def unitary(self,l):
         """
@@ -963,6 +1310,7 @@ class AMS_mono:
         nv = len(self.vertex_elems)
 
         map_global_wirebasket = dict(zip(self.elems_wirebasket, range(self.nf)))
+        self.permutation_matrix_1()
 
         self.trans_fine_wirebasket, self.b_wirebasket, self.source_grav = self.set_global_problem_AMS_gr(map_global_wirebasket)
 
@@ -1075,4 +1423,56 @@ class AMS_mono:
 
         Pf = self.solve_linear_problem(self.trans_fine_wirebasket, self.b_wirebasket, self.nf)
         self.mb.tag_set_data(self.pf_tag, self.elems_wirebasket, np.asarray(Pf))
+        self.mb.write_file('new_out_mono_AMS.vtk')
+
+    def run_AMS_numpy(self):
+
+        ni = len(self.intern_elems)
+        nf = len(self.face_elems)
+        ne = len(self.edge_elems)
+        nv = len(self.vertex_elems)
+
+        map_global_wirebasket = dict(zip(self.elems_wirebasket, range(self.nf)))
+
+        self.G = self.get_G_matrix_numpy()
+        self.trans_fine_wirebasket, self.b_wirebasket, self.source_grav = self.set_global_problem_AMS_gr_numpy_to_OP(map_global_wirebasket)
+
+
+        self.B = self.get_B_matrix_numpy(self.b_wirebasket, self.source_grav, self.nf)
+        self.Eps = self.convert_matrix_to_numpy(self.Eps_matrix(map_global_wirebasket), self.nf, self.nf)
+        self.I = np.identity(self.nf)
+        self.E = np.dot(self.Eps, self.B) + self.I - self.B
+        self.trans_mod = self.mod_transfine_numpy(self.trans_fine_wirebasket)
+        self.OP = self.get_OP_numpy()
+
+        self.set_OP(self.OP)
+        self.test_OP_numpy()
+
+        self.OR = self.convert_matrix_to_numpy(self.calculate_restriction_op() ,self.nc, self.nf)
+
+        self.C = self.get_C_matrix(self.trans_mod, self.E, self.G)
+
+        trans_fine, b, s = self.set_global_problem_AMS_gr_numpy(self.map_global)
+
+        # Pf = self.solve_linear_problem(self.convert_matrix_to_trilinos(trans_fine, self.nf), self.convert_vector_to_trilinos(b, self.nf), self.nf)
+        # Pf = self.solve_linear_problem(trans_fine, b, self.nf)
+        self.Pf = np.linalg.solve(trans_fine, b)
+        self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, self.Pf)
+        # self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.array(Pf))
+
+        Pms1 = self.solve_Pms_1(trans_fine, b)
+        self.mb.tag_set_data(self.pms2_tag, self.all_fine_vols, Pms1)
+
+        # self.modif_OP_C()
+        MMSWC = np.dot(np.dot(np.dot(self.OP, np.linalg.inv(np.dot(self.OR, np.dot(trans_fine, self.OP)))), self.OR), self.I - np.dot(trans_fine, self.C)) + self.C
+        #
+        self.Pms = self.solve_Pms_iter(MMSWC, b, 10, 1e-9, Pms1, trans_fine)
+
+        self.mb.tag_set_data(self.pms_tag, self.all_fine_vols, self.Pms)
+
+
+        # self.Pms = np.dot(self.OP, np.linalg.solve(np.dot(self.OR, np.dot(trans_fine, self.OP)), np.dot(self.OR, b)))
+
+        self.erro()
+
         self.mb.write_file('new_out_mono_AMS.vtk')

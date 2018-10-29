@@ -63,24 +63,24 @@ l12 = [chamada11, chamada16] # bifasico com gravidade por elemento
 # import pdb; pdb.set_trace()
 
 
-# c1 = '/home/joao/Dropbox/git/Presto2.2_proj2/AMS_SOLVER/tools_cy_py'
-# c2 = '/home/joao/Dropbox/git/Presto2.2_proj2/presto/Preprocessors/AMS/Structured/tools_cy_py'
-# c3 = '/home/joao/Dropbox/git/Presto2.2_proj2'
-# set = 'python setup.py build_ext --inplace'
-#
-# cc = [c1, c2]
+c1 = '/home/joao/Dropbox/git/Presto2.2_proj2/AMS_SOLVER/tools_cy_py'
+c2 = '/home/joao/Dropbox/git/Presto2.2_proj2/presto/Preprocessors/AMS/Structured/tools_cy_py'
+c3 = '/home/joao/Dropbox/git/Presto2.2_proj2'
+set = 'python setup.py build_ext --inplace'
 
-# for i in cc:
-#     os.chdir(i)
-#     os.system(set)
-#
-# os.chdir(c3)
+cc = [c1, c2]
+
+for i in cc:
+    os.chdir(i)
+    os.system(set)
+
+os.chdir(c3)
 
 #
-for i in l12:
-    os.system(i)
+# for i in l10:
+#     os.system(i)
 
-# os.system(chamada16)
+os.system(chamada24)
 
 
 

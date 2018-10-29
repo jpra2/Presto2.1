@@ -3258,7 +3258,7 @@ class Msclassic_bif:
         linearProblem = Epetra.LinearProblem(A, x, b)
         solver = AztecOO.AztecOO(linearProblem)
         solver.SetAztecOption(AztecOO.AZ_output, AztecOO.AZ_warnings)
-        solver.Iterate(10000, 1e-14)
+        solver.Iterate(10000, 1e-15)
 
         return x
 
