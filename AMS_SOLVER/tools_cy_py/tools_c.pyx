@@ -117,3 +117,59 @@ def mod_transfine(n, comm, trans_fine, intern_elems, face_elems, edge_elems, ver
     trans_mod.SumIntoGlobalValues(i, [somar], [i])
 
   return trans_mod
+
+@cython.locals(n = cython.longlong)
+def mod_transfine_multivector(n, comm, trans_fine, intern_elems, face_elems, edge_elems, vertex_elems):
+  """
+  retorna a matriz transmissibilidade wirebasket modoficada
+  """
+
+  cdef:
+    long long i, ni, nf, ne, nv, j, t
+    double somar
+
+  ni = len(intern_elems)
+  nf = len(face_elems)
+  ne = len(edge_elems)
+  nv = len(vertex_elems)
+
+  std_map = Epetra.Map(n, 0, comm)
+  # trans_mod = Epetra.MultiVector(std_map, n)
+  trans_mod = np.zeros((n, n), dtype='float64')
+
+  verif1 = list(range(ni))
+  verif2 = list(range(ni, ni+nf))
+
+  for i in range(n):
+
+    if i >= ni+nf+ne:
+     break
+
+    somar = 0.0
+
+    p1 = np.nonzero(trans_fine[i])[0].astype(np.int32)
+    p0 = trans_fine[i, p1]
+
+    if i < ni:
+       # trans_mod.InsertGlobalValues(i, p0, p1)
+       trans_mod[i, p1] = p0
+       continue
+
+    if i < ni+nf:
+       verif = verif1
+    else:
+       verif = verif2
+
+    t = len(p1)
+
+    for j in range(t):
+     if p1[j] in verif:
+       somar += p0[j]
+     else:
+       # trans_mod.InsertGlobalValues(i, [p0[j]], [p1[j]])
+       trans_mod[i, p1[j]] = p0[j]
+
+    # trans_mod.SumIntoGlobalValues(i, [somar], [i])
+    trans_mod[i, i] += somar
+
+  return trans_mod

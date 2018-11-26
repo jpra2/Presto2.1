@@ -1167,7 +1167,7 @@ class StructuredMultiscaleMesh:
         self.mb.tag_set_data(self.line_elems_tag, all_fine_vols, np.repeat(zeros, len(all_fine_vols)))
 
         # perms = []
-        k = 0.01
+        k = 0.1
         perm_tensor = [k, 0.0, 0.0,
                         0.0, k, 0.0,
                         0.0, 0.0, k]

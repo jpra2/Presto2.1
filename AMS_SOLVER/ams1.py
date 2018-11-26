@@ -263,7 +263,7 @@ class AMS_mono:
         self.rho_tag = mb.tag_get_handle("RHO")
         self.mi_tag = mb.tag_get_handle("MI")
         self.volumes_in_primal_tag = mb.tag_get_handle("VOLUMES_IN_PRIMAL")
-        # self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
+        self.all_faces_boundary_tag = mb.tag_get_handle("ALL_FACES_BOUNDARY")
         # self.all_faces_tag = mb.tag_get_handle("ALL_FACES")
         # self.faces_wells_d_tag = mb.tag_get_handle("FACES_WELLS_D")
         # self.faces_all_fine_vols_ic_tag = mb.tag_get_handle("FACES_ALL_FINE_VOLS_IC")
@@ -308,6 +308,10 @@ class AMS_mono:
         return b
 
     def debug_matrix(self, M, n, **options):
+        """
+        debugar matriz
+        n: numero de linhas
+        """
 
 
         if options.get('flag') == 1:
@@ -317,7 +321,7 @@ class AMS_mono:
                     print('line:{}'.format(i))
                     print(p)
                     print('\n')
-                    time.sleep(0.1)
+                    time.sleep(0.2)
         else:
 
             for i in range(n):
@@ -325,7 +329,7 @@ class AMS_mono:
                 print('line:{}'.format(i))
                 print(p)
                 print('\n')
-                time.sleep(0.1)
+                time.sleep(0.2)
                 # import pdb; pdb.set_trace()
 
         print('saiu do debug')
@@ -536,13 +540,85 @@ class AMS_mono:
 
         return G
 
-    def get_local_matrix(self, global_matrix, id_rows, id_cols, tam):
+    def get_kequiv_by_face(self, face):
+        """
+        retorna os valores de k equivalente para colocar na matriz
+        a partir da face
+
+        input:
+            face: face do elemento
+        output:
+            kequiv: k equivalente
+            elems: elementos vizinhos pela face
+            s: termo fonte da gravidade
+        """
+
+        elems = self.mb.get_adjacencies(face, 3)
+        k1 = self.mb.tag_get_data(self.perm_tag, elems[0]).reshape([3, 3])
+        k2 = self.mb.tag_get_data(self.perm_tag, elems[1]).reshape([3, 3])
+        centroid1 = self.mesh_topo_util.get_average_position([elems[0]])
+        centroid2 = self.mesh_topo_util.get_average_position([elems[1]])
+        direction = centroid2 - centroid1
+        uni = self.unitary(direction)
+        k1 = np.dot(np.dot(k1,uni),uni)
+        k2 = np.dot(np.dot(k2,uni),uni)
+        keq = self.kequiv(k1, k2)*(np.dot(self.A, uni))/(self.mi*abs(np.dot(direction, uni)))
+        z1 = self.tz - centroid1[2]
+        z2 = self.tz - centroid2[2]
+        s_gr = self.gama*keq*(z1-z2)
+
+        return keq, s_gr, elems
+
+    def get_fat_ILU_numpy(self, A):
+        n = A.shape[0]
+        LU = A.copy()
+
+        for i in range(0,n-1):
+            for j in range(i+1,n):
+                if (A[i,j] != 0):
+                    LU[j,i] = LU[j,i]/LU[i,i]
+            for j in range(i+1,n):
+                for k in range(i+1,n):
+                    if (A[j,k] != 0):
+                        LU[j,k] = LU[j,k] - LU[j, i] * LU[i,k]
+
+        return LU
+
+    def get_inverse_tril(self, A, rows):
+        """
+        Obter a matriz inversa de A
+        obs: A deve ser quadrada
+        input:
+            A: CrsMatrix
+            rows: numero de linhas
+
+        output:
+            INV: CrsMatrix inversa de A
+        """
+        num_cols = A.NumMyCols()
+        num_rows = A.NumMyRows()
+        assert num_cols == num_rows
+        map1 = Epetra.Map(rows, 0, self.comm)
+
+        Inv = Epetra.CrsMatrix(Epetra.Copy, map1, 3)
+
+        for i in range(rows):
+            b = Epetra.Vector(map1)
+            b[i] = 1.0
+
+            x = self.solve_linear_problem(A, b, rows)
+            lines = np.nonzero(x[:])[0].astype(np.int32)
+            col = np.repeat(i, len(lines)).astype(np.int32)
+            Inv.InsertGlobalValues(lines, col, x[lines])
+
+        return Inv
+
+    def get_local_matrix(self, global_matrix, id_rows, id_cols):
         rows = len(id_rows)
         cols = len(id_cols)
-        # row_map = Epetra.Map(rows, 0, self.comm)
-        # col_map = Epetra.Map(cols, 0, self.comm)
-        std_map = Epetra.Map(tam, 0, self.comm)
-        A = Epetra.CrsMatrix(Epetra.Copy, std_map, 3)
+        row_map = Epetra.Map(rows, 0, self.comm)
+        col_map = Epetra.Map(cols, 0, self.comm)
+        A = Epetra.CrsMatrix(Epetra.Copy, row_map, col_map, 3)
 
         cont = 0
         for i in id_rows:
@@ -568,30 +644,152 @@ class AMS_mono:
 
         return A
 
-    def get_OP(self, P0, P1, P2, P3):
+    def get_CrsMatrix_by_array(self, M, n_rows = None, n_cols = None):
+        """
+        retorna uma CrsMatrix a partir de um array numpy
+        input:
+            M: array numpy (matriz)
+            n_rows: (opcional) numero de linhas da matriz A
+            n_cols: (opcional) numero de colunas da matriz A
+        output:
+            A: CrsMatrix
+        """
 
-        Ps = [P3, P2, P1, P0]
-        std_map = Epetra.Map(self.nf, 0, self.comm)
-        OP = Epetra.CrsMatrix(Epetra.Copy, std_map, 1)
+        if n_rows == None and n_cols == None:
+            rows, cols = M.shape
+        else:
+            if n_rows == None or n_cols == None:
+                print('determine n_rows e n_cols')
+                sys.exit(0)
+            else:
+                rows = n_rows
+                cols = n_cols
 
+        row_map = Epetra.Map(rows, 0, self.comm)
+        col_map = Epetra.Map(cols, 0, self.comm)
+        A = Epetra.CrsMatrix(Epetra.Copy, row_map, col_map, 7)
+
+        rows = np.nonzero(M)[0].astype(np.int32)
+        cols = np.nonzero(M)[1].astype(np.int32)
+
+        A.InsertGlobalValues(rows, cols, M[rows, cols])
+
+        return A
+
+    def put_matrix_into_OP(self, M, rowsM, ind1, ind2):
+        """
+        Coloca a Matriz (array numpy) M dentro do Operador de Prolongamento
+        input:
+            rowsM: numero de linhas de M
+            ind1: indice inicial da linha do OP
+            ind2: indice final da linha do OP
+        """
+
+        lines = list(range(ind1, ind2))
+        colunas = np.nonzero(M)[1].astype(np.int32)
+        linhas = np.nonzero(M)[0]
+
+        values = M[linhas, colunas]
+
+        self.OP.InsertGlobalValues(lines, colunas, values)
+
+    def put_CrsMatrix_into_OP(self, M, ind1, ind2):
+        """
+        Coloca a Matriz M (CrsMatrix) dentro do Operador de Prolongamento
+        input:
+            ind1: indice inicial da linha do OP
+            ind2: indice final da linha do OP
+        """
+
+        n_rows = M.NumMyRows()
+        n_cols = M.NumMyCols()
+
+        map_lines = dict(zip(range(n_rows), range(ind1, ind2)))
+
+        for i in range(n_rows):
+            p = M.ExtractGlobalRowCopy(i)
+            line = map_lines[i]
+            self.OP.InsertGlobalValues(line, p[0], p[1])
+
+    def get_OP(self):
+        lim = 1e-7
+
+        # map_global_wirebasket = dict(zip(self.elems_wirebasket, range(self.nf)))
         ni = len(self.intern_elems)
         nf = len(self.face_elems)
         ne = len(self.edge_elems)
         nv = len(self.vertex_elems)
-        ns = [ni, nf, ne, nv]
 
-        cont = 0
-        for i in range(4):
-            P = Ps[i]
-            n = ns[i]
+        idsi = ni
+        idsf = ni+nf
+        idse = idsf+ne
+        idsv = idse+nv
 
-            for j in range(n):
-                p = P.ExtractGlobalRowCopy(j)
-                OP.InsertGlobalValues(cont, p[0], p[1])
-                cont += 1
+        std_map = Epetra.Map(self.nf, 0, self.comm)
+        self.OP = Epetra.CrsMatrix(Epetra.Copy, std_map, 1)
 
-        OP.FillComplete()
-        return OP
+        self.put_matrix_into_OP(np.identity(nv, dtype='float64'), nv, ni+nf+ne, ni+nf+ne+nv)
+
+        ###
+        #elementos de aresta (edge)
+        ind1 = idsf
+        ind2 = idse
+        M = self.get_CrsMatrix_by_array(self.trans_mod[idsf:idse, idsf:idse])
+        M = self.get_inverse_tril(M, ne)
+        M = self.get_negative_matrix(M, ne)
+        M2 = self.get_CrsMatrix_by_array(self.trans_mod[idsf:idse, idse:idsv], n_rows = ne, n_cols = ne)
+        M = self.pymultimat(M, M2, ne)
+        M2 = self.modificar_matriz(M, ne, nv, ne)
+        self.put_CrsMatrix_into_OP(M2, ind1, ind2)
+        self.test_OP_tril(ind1 = idsf, ind2 = idse)
+
+        #elementos de face
+        ind1 = idsi
+        ind2 = idsf
+        M2 = self.get_CrsMatrix_by_array(self.trans_mod[idsi:idsf, idsi:idsf])
+        M2 = self.get_inverse_tril(M2, nf)
+        M2 = self.get_negative_matrix(M2, nf)
+        M3 = self.get_CrsMatrix_by_array(self.trans_mod[idsi:idsf, idsf:idse], n_rows = nf, n_cols = nf)
+        M = self.modificar_matriz(M, nf, nf, ne)
+        M = self.pymultimat(self.pymultimat(M2, M3, nf), M, nf)
+        M2 = self.modificar_matriz(M, nf, nv, nf)
+        self.put_CrsMatrix_into_OP(M2, ind1, ind2)
+        self.test_OP_tril(ind1 = idsi, ind2 = idsf)
+
+
+        #elementos internos
+        ind1 = 0
+        ind2 = idsi
+        M2 = self.get_CrsMatrix_by_array(self.trans_mod[0:idsi, 0:idsi])
+        M2 = self.get_inverse_tril(M2, ni)
+        M2 = self.get_negative_matrix(M2, ni)
+        M3 = self.get_CrsMatrix_by_array(self.trans_mod[0:idsi, idsi:idsf], n_rows = ni, n_cols = ni)
+        M = self.modificar_matriz(M, ni, ni, nf)
+        M = self.pymultimat(self.pymultimat(M2, M3, ni), M, ni)
+
+        # M_test = np.zeros((ni, ni), dtype='float64')
+        # for i in range(ni):
+        #     p = M.ExtractGlobalRowCopy(i)
+        #     M_test[i, p[1]] = p[0]
+        #
+        # np.save('test_op_tril', M_test)
+        M2 = self.modificar_matriz(M, ni, nv, ni)
+
+        # for i in range(ni):
+        #     p = M2.ExtractGlobalRowCopy(i)
+        #     if sum(p[0]) > 1.0 + lim or sum(p[0]) < 1 - lim:
+        #         print(p[0])
+        #         print(p[1])
+        #         print(i)
+        #         print(sum(p[0]))
+        #         print('\n')
+        #         import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
+
+        self.put_CrsMatrix_into_OP(M2, ind1, ind2)
+        self.test_OP_tril(ind1 = 0, ind2 = idsi)
+
+        # self.OP = self.pymultimat(self.G, self.OP, self.nf, transpose_A = True)
 
     def get_OP_numpy(self):
 
@@ -607,6 +805,15 @@ class AMS_mono:
         OP[idsf:idse] = -np.dot(np.linalg.inv(self.trans_mod[idsf:idse, idsf:idse]), self.trans_mod[idsf:idse, idse:idsv])
         OP[idsi:idsf] = -np.dot(np.dot(np.linalg.inv(self.trans_mod[idsi:idsf, idsi:idsf]), self.trans_mod[idsi:idsf, idsf:idse]), OP[idsf:idse])
         OP[0:idsi] = -np.dot(np.dot(np.linalg.inv(self.trans_mod[0:idsi, 0:idsi]), self.trans_mod[0:idsi, idsi:idsf]), OP[idsi:idsf])
+
+        # np.save('test_op_numpy', OP[0:idsi])
+
+
+        # for i in range(self.nni):
+        #     p = np.nonzero(OP[i])[0]
+        #     print(OP[i, p])
+        #     print(sum(OP[i, p]))
+        #     import pdb; pdb.set_trace()
 
         # for elem in self.wells_d:
         #     idx = self.map_wirebasket[elem]
@@ -691,8 +898,14 @@ class AMS_mono:
         retirando a influencia dos vizinhos
         """
 
-        self.trans_mod = tools_c.mod_transfine(self.nf, self.comm, self.trans_fine_wirebasket, self.intern_elems, self.face_elems, self.edge_elems, self.vertex_elems)
+        return tools_c.mod_transfine(self.nf, self.comm, self.trans_fine_wirebasket, self.intern_elems, self.face_elems, self.edge_elems, self.vertex_elems)
         # self.trans_mod = self.mod_transfine_2(self.nf, self.comm, self.trans_fine_wirebasket, self.intern_elems, self.face_elems, self.edge_elems, self.vertex_elems)
+
+    def mod_transfine_multivector(self):
+        """
+        retorna a matriz transmissiblidade modificada
+        """
+        return tools_c.mod_transfine_multivector(self.nf, self.comm, self.trans_fine_wirebasket, self.intern_elems, self.face_elems, self.edge_elems, self.vertex_elems)
 
     def mod_transfine_numpy(self, trans_fine_wirebasket):
         """
@@ -771,6 +984,33 @@ class AMS_mono:
             self.C[idx] = temp1.copy()
             self.C[idx, idx] = 1.0
             self.OP[idx] = temp2.copy()
+
+    def modificar_matriz(self, A, rows, columns, walk_rows):
+        """
+        Modifica a matriz A para o tamanho (rows x columns)
+        input:
+            walk_rows: linhas para caminhar na matriz A
+            rows: numero de linhas da nova matriz (C)
+            columns: numero de colunas da nova matriz (C)
+        output:
+            C: CrsMatrix  rows x columns
+
+        """
+
+        row_map = Epetra.Map(rows, 0, self.comm)
+        col_map = Epetra.Map(columns, 0, self.comm)
+
+        C = Epetra.CrsMatrix(Epetra.Copy, row_map, col_map, 3)
+
+        for i in range(walk_rows):
+            p = A.ExtractGlobalRowCopy(i)
+            values = p[0]
+            index_columns = p[1]
+            C.InsertGlobalValues(i, values, index_columns)
+
+        # C.FillComplete()
+
+        return C
 
     def mount_lines_3(self, elem, map_local, **options):
         """
@@ -940,19 +1180,23 @@ class AMS_mono:
         global_map = list(range(self.nf))
         wirebasket_map = [self.map_global[i] for i in self.elems_wirebasket]
 
-        self.G = tools_c.permutation_matrix(self.nf, global_map, wirebasket_map, self.comm)
+        return tools_c.permutation_matrix(self.nf, global_map, wirebasket_map, self.comm)
 
-    def pymultimat(self, A, B, nf):
+    def pymultimat(self, A, B, nf, transpose_A = False, transpose_B = False):
         """
         Multiplica a matriz A pela matriz B ambas de mesma ordem e quadradas
 
         """
+        if A.Filled() == False:
+            A.FillComplete()
+        if B.Filled() == False:
+            B.FillComplete()
 
         nf_map = Epetra.Map(nf, 0, self.comm)
 
         C = Epetra.CrsMatrix(Epetra.Copy, nf_map, 3)
 
-        EpetraExt.Multiply(A, False, B, False, C)
+        EpetraExt.Multiply(A, transpose_A, B, transpose_B, C)
 
         # C.FillComplete()
 
@@ -1074,13 +1318,17 @@ class AMS_mono:
 
         std_map = Epetra.Map(self.nf, 0, self.comm)
         trans_fine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        multi = Epetra.MultiVector(std_map, self.nf)
         b = Epetra.Vector(std_map)
         s = Epetra.Vector(std_map)
-        for volume in set(self.all_fine_vols) - set(self.wells_d):
+
+        # for volume in set(self.all_fine_vols) - set(self.wells_d):
+        for volume in self.all_fine_vols:
             #1
             temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
             self.mb.tag_set_data(self.flux_coarse_tag, volume, source_grav)
             trans_fine.InsertGlobalValues(map_global[volume], temp_k, temp_glob_adj)
+            # multi[map_global[volume], temp_glob_adj] = temp_k
             b[map_global[volume]] += source_grav
             s[map_global[volume]] = source_grav
             if volume in self.wells_n:
@@ -1093,23 +1341,75 @@ class AMS_mono:
                     #3
                     b[map_global[volume]] += -dict_wells_n[volume]
         #0
-        for volume in self.wells_d:
-            #1
-            # temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
-            # self.mb.tag_set_data(self.flux_coarse_tag, volume, source_grav)
-            trans_fine.InsertGlobalValues(map_global[volume], [1.0], [map_global[volume]])
-            b[map_global[volume]] = dict_wells_d[volume]
+        # for volume in self.wells_d:
+        #     #1
+        #     # temp_k, temp_glob_adj, source_grav = self.mount_lines_3_gr(volume, map_global)
+        #     # self.mb.tag_set_data(self.flux_coarse_tag, volume, source_grav)
+        #     trans_fine.InsertGlobalValues(map_global[volume], [1.0], [map_global[volume]])
+        #     # multi[map_global[volume], map_global[volume]] = 1.0
+        #     b[map_global[volume]] = dict_wells_d[volume]
 
         trans_fine.FillComplete()
 
-        # for i in range(self.nf):
-        #     print(b[i])
-        #     # print(s[i])
-        #     print('\n')
-        #     import pdb; pdb.set_trace()
+        return trans_fine, b, s
+
+    def set_global_problem_AMS_gr_faces(self, map_global):
+        """
+        transmissibilidade da malha fina
+        input:
+            map_global: mapeamento global
+
+        output:
+            trans_fine: (multivector) transmissiblidade da malha fina
+            b: (vector) termo fonte total
+            s: (vector) termo fonte apenas da gravidade
+        obs: com funcao para obter dados dos elementos
+        """
+        #0
+        all_faces = self.mb.get_entities_by_dimension(0, 2)
+        all_faces_boundary_set = self.mb.tag_get_data(self.all_faces_boundary_tag, 0, flat=True)[0]
+        all_faces_boundary_set = self.mb.get_entities_by_handle(all_faces_boundary_set)
+
+        std_map = Epetra.Map(self.nf, 0, self.comm)
+        # trans_fine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        # trans_fine = Epetra.MultiVector(std_map, self.nf)
+        trans_fine = np.zeros((self.nf, self.nf), dtype='float64')
+        b = Epetra.Vector(std_map)
+        s = Epetra.Vector(std_map)
+
+        for face in set(all_faces) - set(all_faces_boundary_set):
+            #1
+            keq, s_grav, elems = self.get_kequiv_by_face(face)
+            cols = [map_global[elems[0]], map_global[elems[1]], map_global[elems[0]], map_global[elems[1]]]
+            lines = [map_global[elems[1]], map_global[elems[0]], map_global[elems[0]], map_global[elems[1]]]
+            values = [-keq, -keq, keq, keq]
+            s[map_global[elems[0]]] += s_grav
+            b[map_global[elems[0]]] += s_grav
+            s[map_global[elems[1]]] += -s_grav
+            b[map_global[elems[1]]] += -s_grav
+
+            ###################################
+            # Para o caso que trans_fine = MultiVector ou array do numpy
+            trans_fine[lines, cols] += values
+
+            ###################################
 
 
-        # return trans_fine, b, s
+            ################################
+            #Para o caso em que trans_fine = CrsMatrix
+            # p0 = trans_fine.ExtractGlobalRowCopy(map_global[elems[0]])
+            # p1 = trans_fine.ExtractGlobalRowCopy(map_global[elems[1]])
+            # if map_global[elems[0]] not in p0[1]:
+            #     trans_fine.InsertGlobalValues(map_global[elems[0]], [0.0], [map_global[elems[0]]])
+            # if map_global[elems[1]] not in p0[1]:
+            #     trans_fine.InsertGlobalValues(map_global[elems[0]], [0.0], [map_global[elems[1]]])
+            # if map_global[elems[0]] not in p1[1]:
+            #     trans_fine.InsertGlobalValues(map_global[elems[1]], [0.0], [map_global[elems[0]]])
+            # if map_global[elems[1]] not in p1[1]:
+            #     trans_fine.InsertGlobalValues(map_global[elems[1]], [0.0], [map_global[elems[1]]])
+            # trans_fine.SumIntoGlobalValues(lines, cols, values)
+            #####################################################
+
 
         return trans_fine, b, s
 
@@ -1242,6 +1542,11 @@ class AMS_mono:
 
     def solve_linear_problem(self, A, b, n):
 
+        if A.Filled():
+            pass
+        else:
+            A.FillComplete()
+
         std_map = Epetra.Map(n, 0, self.comm)
 
         x = Epetra.Vector(std_map)
@@ -1253,14 +1558,28 @@ class AMS_mono:
 
         return x
 
-    def solve_Pms_iter(self, M, b, its, err, P1, A):
+    def solve_Pms_iter(self, M, b, its, res, P1, A):
 
-        err2 = 10.0
+        res2 = 1000.0
         cont = 0
-        while(its > cont and err2 > err):
+        while(its > cont or res2 > res):
             import pdb; pdb.set_trace()
             P2 = P1 + np.dot(M, b - np.dot(A, P1))
-            err2 = max(list(map(abs, P2 - P1)))
+            res2 = np.amax(np.absolute(b-np.dot(A, P2)))
+            P1 = P2
+            cont += 1
+
+        return P2
+
+    def solve_Pms_iter2(self, MFE, MILU, b, its, res, P1, A):
+
+        res2 = 1000.0
+        cont = 0
+        while(its > cont or res2 > res):
+            import pdb; pdb.set_trace()
+            P2 = P1 + np.dot(MFE, b - np.dot(A, P1))
+            P2 = P2 + np.dot(MILU, b - np.dot(A, P2))
+            res2 = np.amax(np.absolute(b - np.dot(A, P2)))
             P1 = P2
             cont += 1
 
@@ -1292,13 +1611,65 @@ class AMS_mono:
             print('o Operador de prolongamento nao esta dando unitario')
             import pdb; pdb.set_trace()
 
+    def test_OP_tril(self, ind1 = None, ind2 = None):
+        lim = 1e-7
+        if ind1 == None and ind2 == None:
+            verif = range(self.nf)
+        elif ind1 == None or ind2 == None:
+                print('defina ind1 e ind2')
+                sys.exit(0)
+        else:
+            verif = range(ind1, ind2)
+
+        for i in verif:
+            p = self.OP.ExtractGlobalRowCopy(i)
+            if sum(p[0]) > 1+lim or sum(p[0]) < 1-lim:
+                print('Erro no Operador de Prologamento')
+                print(i)
+                print(sum(p[0]))
+                import pdb; pdb.set_trace()
+
+    def test_app(self):
+        jk = 5
+
+        A = np.zeros((jk, jk), dtype='float64')
+        A[0,0] = 1.0
+        A[jk-1, jk-1] = 1.0
+
+
+
+
+        for i in range(1, jk-1):
+            A[i, [i-1, i, i+1]] = [-1.0, 2.0, -1.0]
+
+
+        std_map3 = Epetra.Map(jk, 0, self.comm)
+        b = Epetra.Vector(std_map3)
+        b[jk-1] = 1.0
+        A_tril = Epetra.CrsMatrix(Epetra.Copy, std_map3, 3)
+        multi4 = Epetra.MultiVector(std_map3, jk)
+        multi5 = Epetra.MultiVector(std_map3, jk)
+
+        for i in range(jk):
+            multi4[i,i] = 1.0
+            temp = np.nonzero(A[i])[0].astype(np.int32)
+            A_tril.InsertGlobalValues(i, A[i, temp], temp)
+
+        # A_tril.FillComplete()
+
+        we = A_tril.ApplyInverse(multi4, multi5)
+
+        A_inv = self.get_inverse_tril(A_tril, jk)
+
+        import pdb; pdb.set_trace()
+
     def unitary(self,l):
         """
         obtem o vetor unitario positivo da direcao de l
 
         """
-        uni = l/np.linalg.norm(l)
-        uni = uni*uni
+        uni = np.absolute(l/np.linalg.norm(l))
+        # uni = np.abs(uni)
 
         return uni
 
@@ -1310,7 +1681,7 @@ class AMS_mono:
         nv = len(self.vertex_elems)
 
         map_global_wirebasket = dict(zip(self.elems_wirebasket, range(self.nf)))
-        self.permutation_matrix_1()
+        self.G = self.permutation_matrix_1()
 
         self.trans_fine_wirebasket, self.b_wirebasket, self.source_grav = self.set_global_problem_AMS_gr(map_global_wirebasket)
 
@@ -1318,9 +1689,9 @@ class AMS_mono:
         #     print(self.b_wirebasket[map_global_wirebasket[elem]])
         #     import pdb; pdb.set_trace()
         # self.trans_fine_wirebasket, self.b_wirebasket = self.set_global_problem_AMS_gr(map_global_wirebasket)
-        self.B = tools_c.B_matrix(self.nf, self.b_wirebasket, self.source_grav, self.elems_wirebasket, self.wells_d, self.comm)
-        self.Eps = self.Eps_matrix(map_global_wirebasket)
-        self.I = tools_c.I_matrix(self.nf, self.comm)
+        # self.B = tools_c.B_matrix(self.nf, self.b_wirebasket, self.source_grav, self.elems_wirebasket, self.wells_d, self.comm)
+        # self.Eps = self.Eps_matrix(map_global_wirebasket)
+        # self.I = tools_c.I_matrix(self.nf, self.comm)
         # B_np = self.convert_matrix_to_numpy(self.B, self.nf)
         # Eps_np = self.convert_matrix_to_numpy(self.Eps, self.nf)
         #
@@ -1335,19 +1706,21 @@ class AMS_mono:
         # import pdb; pdb.set_trace()
 
 
-        self.E = self.pymultimat(self.Eps, self.B, self.nf)
+        # self.E = self.pymultimat(self.Eps, self.B, self.nf)
 
         nf_map = Epetra.Map(self.nf, 0, self.comm)
 
-        self.I.FillComplete()
-        EpetraExt.Add(self.I, False, 1.0, self.E, 1.0)
-        self.B.FillComplete()
-        EpetraExt.Add(self.B, False, -1.0, self.E, 1.0)
+        # self.I.FillComplete()
+        # EpetraExt.Add(self.I, False, 1.0, self.E, 1.0)
+        # self.B.FillComplete()
+        # EpetraExt.Add(self.B, False, -1.0, self.E, 1.0)
 
-        self.mod_transfine()
+        self.trans_mod = self.mod_transfine()
+
+        self.OP = self.get_OP()
 
         id_rows = [map_global_wirebasket[i] for i in self.intern_elems]
-        Aii = self.get_local_matrix(self.trans_mod, id_rows, id_rows, self.nf)
+        Aii = self.get_local_matrix(self.trans_mod, id_rows, id_rows)
         # Aii.FillComplete()
         # diag = Aii[0,0]
         # m1 = Aii[0]
@@ -1357,73 +1730,73 @@ class AMS_mono:
         # print(m1[inds])
         # print(Aii.__getitem__((0,0)))
         # import pdb; pdb.set_trace()
-        id_cols = [map_global_wirebasket[i] for i in self.face_elems]
-        Aif = self.get_local_matrix(self.trans_mod, id_rows, id_cols, self.nf)
-
-        Aff = self.get_local_matrix(self.trans_mod, id_cols, id_cols, self.nf)
-        id_rows = [map_global_wirebasket[i] for i in self.face_elems]
-        id_cols = [map_global_wirebasket[i] for i in self.edge_elems]
-        Afe = self.get_local_matrix(self.trans_mod, id_rows, id_cols, self.nf)
-
-        Aee = self.get_local_matrix(self.trans_mod, id_cols, id_cols, self.nf)
-
-        id_rows = [map_global_wirebasket[i] for i in self.edge_elems]
-        id_cols = [map_global_wirebasket[i] for i in self.vertex_elems]
-        Aev = self.get_local_matrix(self.trans_mod, id_rows, id_cols, self.nf)
-        Ivv = tools_c.I_matrix(len(self.vertex_elems), self.comm)
-
-
-        Aee.FillComplete()
-
-        Aee_n = self.get_negative_matrix(Aee, self.nf)
-        Aee_n.FillComplete()
-        Aev.FillComplete()
-
-        Aii_np = self.convert_matrix_to_numpy(Aii, ni)
-        Aev_np = self.convert_matrix_to_numpy(Aev, self.nf)
-
-        # P1_np = -1*(np.dot(np.linalg.inv(Aee_np), Aev_np))
-
-        Mat = Aii_np
-        n = len(Mat)
-        for i in range(n):
-            inds = np.nonzero(Mat[i])[0]
-            if len(inds) > 0:
-                print(Mat[i, inds])
-
-        print(np.linalg.det(Mat))
-        import pdb; pdb.set_trace()
-
-
-
-
-        P1 = self.pymultimat(Aee_n, Aev, self.nf)
-
-
-        Aff.FillComplete()
-        Aff_n = self.get_negative_matrix(Aff, self.nf)
-        P2 = self.pymultimat(Aff_n, self.pymultimat(Afe ,P1, self.nf), self.nf)
-        Aii.FillComplete()
-        Aii_n = self.get_negative_matrix(Aff, self.nf)
-        P3 = self.pymultimat(Aii_n, self.pymultimat(Aif ,P2, self.nf), self.nf)
-        P0 = Ivv
-
-
-        M1 = self.get_OP(P0, P1, P2, P3)
-        for i in range(self.nf):
-            p = M1.ExtractGlobalRowCopy(i)
-            print(p)
-            print('\n')
-            import pdb; pdb.set_trace()
-
-
-        self.OP = self.pymultimat(self.G, self.get_OP(P0, P1, P2, P3), self.nf)
-        self.OP.FillComplete()
-
-
-        Pf = self.solve_linear_problem(self.trans_fine_wirebasket, self.b_wirebasket, self.nf)
-        self.mb.tag_set_data(self.pf_tag, self.elems_wirebasket, np.asarray(Pf))
-        self.mb.write_file('new_out_mono_AMS.vtk')
+        # id_cols = [map_global_wirebasket[i] for i in self.face_elems]
+        # Aif = self.get_local_matrix(self.trans_mod, id_rows, id_cols, self.nf)
+        #
+        # Aff = self.get_local_matrix(self.trans_mod, id_cols, id_cols, self.nf)
+        # id_rows = [map_global_wirebasket[i] for i in self.face_elems]
+        # id_cols = [map_global_wirebasket[i] for i in self.edge_elems]
+        # Afe = self.get_local_matrix(self.trans_mod, id_rows, id_cols, self.nf)
+        #
+        # Aee = self.get_local_matrix(self.trans_mod, id_cols, id_cols, self.nf)
+        #
+        # id_rows = [map_global_wirebasket[i] for i in self.edge_elems]
+        # id_cols = [map_global_wirebasket[i] for i in self.vertex_elems]
+        # Aev = self.get_local_matrix(self.trans_mod, id_rows, id_cols, self.nf)
+        # Ivv = tools_c.I_matrix(len(self.vertex_elems), self.comm)
+        #
+        #
+        # Aee.FillComplete()
+        #
+        # Aee_n = self.get_negative_matrix(Aee, self.nf)
+        # Aee_n.FillComplete()
+        # Aev.FillComplete()
+        #
+        # Aii_np = self.convert_matrix_to_numpy(Aii, ni)
+        # Aev_np = self.convert_matrix_to_numpy(Aev, self.nf)
+        #
+        # # P1_np = -1*(np.dot(np.linalg.inv(Aee_np), Aev_np))
+        #
+        # Mat = Aii_np
+        # n = len(Mat)
+        # for i in range(n):
+        #     inds = np.nonzero(Mat[i])[0]
+        #     if len(inds) > 0:
+        #         print(Mat[i, inds])
+        #
+        # print(np.linalg.det(Mat))
+        # import pdb; pdb.set_trace()
+        #
+        #
+        #
+        #
+        # P1 = self.pymultimat(Aee_n, Aev, self.nf)
+        #
+        #
+        # Aff.FillComplete()
+        # Aff_n = self.get_negative_matrix(Aff, self.nf)
+        # P2 = self.pymultimat(Aff_n, self.pymultimat(Afe ,P1, self.nf), self.nf)
+        # Aii.FillComplete()
+        # Aii_n = self.get_negative_matrix(Aff, self.nf)
+        # P3 = self.pymultimat(Aii_n, self.pymultimat(Aif ,P2, self.nf), self.nf)
+        # P0 = Ivv
+        #
+        #
+        # M1 = self.get_OP(P0, P1, P2, P3)
+        # for i in range(self.nf):
+        #     p = M1.ExtractGlobalRowCopy(i)
+        #     print(p)
+        #     print('\n')
+        #     import pdb; pdb.set_trace()
+        #
+        #
+        # self.OP = self.pymultimat(self.G, self.get_OP(P0, P1, P2, P3), self.nf)
+        # self.OP.FillComplete()
+        #
+        #
+        # Pf = self.solve_linear_problem(self.trans_fine_wirebasket, self.b_wirebasket, self.nf)
+        # self.mb.tag_set_data(self.pf_tag, self.elems_wirebasket, np.asarray(Pf))
+        # self.mb.write_file('new_out_mono_AMS.vtk')
 
     def run_AMS_numpy(self):
 
@@ -1436,43 +1809,63 @@ class AMS_mono:
 
         self.G = self.get_G_matrix_numpy()
         self.trans_fine_wirebasket, self.b_wirebasket, self.source_grav = self.set_global_problem_AMS_gr_numpy_to_OP(map_global_wirebasket)
-
-
-        self.B = self.get_B_matrix_numpy(self.b_wirebasket, self.source_grav, self.nf)
-        self.Eps = self.convert_matrix_to_numpy(self.Eps_matrix(map_global_wirebasket), self.nf, self.nf)
-        self.I = np.identity(self.nf)
-        self.E = np.dot(self.Eps, self.B) + self.I - self.B
+        #
+        #
+        # self.B = self.get_B_matrix_numpy(self.b_wirebasket, self.source_grav, self.nf)
+        # self.Eps = self.convert_matrix_to_numpy(self.Eps_matrix(map_global_wirebasket), self.nf, self.nf)
+        # self.I = np.identity(self.nf)
+        # self.E = np.dot(self.Eps, self.B) + self.I - self.B
         self.trans_mod = self.mod_transfine_numpy(self.trans_fine_wirebasket)
+        # t1 = time.time()
         self.OP = self.get_OP_numpy()
+        # t2 = time.time()
+        # print('tempo de calculo do OP:{}'.format(t2-t1))
 
         self.set_OP(self.OP)
         self.test_OP_numpy()
 
-        self.OR = self.convert_matrix_to_numpy(self.calculate_restriction_op() ,self.nc, self.nf)
-
-        self.C = self.get_C_matrix(self.trans_mod, self.E, self.G)
-
-        trans_fine, b, s = self.set_global_problem_AMS_gr_numpy(self.map_global)
-
-        # Pf = self.solve_linear_problem(self.convert_matrix_to_trilinos(trans_fine, self.nf), self.convert_vector_to_trilinos(b, self.nf), self.nf)
-        # Pf = self.solve_linear_problem(trans_fine, b, self.nf)
-        self.Pf = np.linalg.solve(trans_fine, b)
-        self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, self.Pf)
-        # self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.array(Pf))
-
-        Pms1 = self.solve_Pms_1(trans_fine, b)
-        self.mb.tag_set_data(self.pms2_tag, self.all_fine_vols, Pms1)
-
-        # self.modif_OP_C()
-        MMSWC = np.dot(np.dot(np.dot(self.OP, np.linalg.inv(np.dot(self.OR, np.dot(trans_fine, self.OP)))), self.OR), self.I - np.dot(trans_fine, self.C)) + self.C
+        # self.OR = self.convert_matrix_to_numpy(self.calculate_restriction_op() ,self.nc, self.nf)
+        # # self.OR = self.OP.T
         #
-        self.Pms = self.solve_Pms_iter(MMSWC, b, 10, 1e-9, Pms1, trans_fine)
-
-        self.mb.tag_set_data(self.pms_tag, self.all_fine_vols, self.Pms)
-
-
-        # self.Pms = np.dot(self.OP, np.linalg.solve(np.dot(self.OR, np.dot(trans_fine, self.OP)), np.dot(self.OR, b)))
-
-        self.erro()
+        # self.C = self.get_C_matrix(self.trans_mod, self.E, self.G)
+        #
+        # trans_fine, b, s = self.set_global_problem_AMS_gr_numpy(self.map_global)
+        #
+        # # Pf = self.solve_linear_problem(self.convert_matrix_to_trilinos(trans_fine, self.nf), self.convert_vector_to_trilinos(b, self.nf), self.nf)
+        # # Pf = self.solve_linear_problem(trans_fine, b, self.nf)
+        # self.Pf = np.linalg.solve(trans_fine, b)
+        # self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, self.Pf)
+        # # self.mb.tag_set_data(self.pf_tag, self.all_fine_vols, np.array(Pf))
+        #
+        # Pms1 = self.solve_Pms_1(trans_fine, b)
+        # self.mb.tag_set_data(self.pms2_tag, self.all_fine_vols, Pms1)
+        #
+        # # self.modif_OP_C()
+        # MMSWC = np.dot(np.dot(np.dot(self.OP, np.linalg.inv(np.dot(self.OR, np.dot(trans_fine, self.OP)))), self.OR), self.I - np.dot(trans_fine, self.C)) + self.C
+        # #
+        #
+        # self.Pms = self.solve_Pms_iter(MMSWC, b, 10, 1e-9, Pms1, trans_fine)
+        #
+        # self.mb.tag_set_data(self.pms_tag, self.all_fine_vols, self.Pms)
+        #
+        #
+        # # self.Pms = np.dot(self.OP, np.linalg.solve(np.dot(self.OR, np.dot(trans_fine, self.OP)), np.dot(self.OR, b)))
+        #
+        # self.erro()
 
         self.mb.write_file('new_out_mono_AMS.vtk')
+
+    def run_AMS_faces(self):
+        """
+        Roda o problema AMS obtendo a matriz de transmissiblidade por faces
+        """
+        map_global_wirebasket = dict(zip(self.elems_wirebasket, range(self.nf)))
+        self.G = self.permutation_matrix_1()
+        self.trans_fine_wirebasket, b_wirebasket, source_grav = self.set_global_problem_AMS_gr_faces(map_global_wirebasket)
+
+        self.trans_mod = self.mod_transfine_multivector()
+        self.get_OP()
+        self.test_OP_tril()
+
+
+        import pdb; pdb.set_trace()

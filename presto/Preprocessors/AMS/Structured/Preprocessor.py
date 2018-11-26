@@ -167,15 +167,15 @@ class Preprocessor(object):
         self.smm.propriedades()
         print("took {0}\n".format(time.time()-t0))
 
-        # print('get_faces')
-        # t0 = time.time()
-        # self.smm.get_faces()
-        # print("took {0}\n".format(time.time()-t0))
-
-        print('set_volumes_in_primal')
+        print('get_faces')
         t0 = time.time()
-        self.smm.set_volumes_in_primal()
+        self.smm.get_faces()
         print("took {0}\n".format(time.time()-t0))
+
+        # print('set_volumes_in_primal')
+        # t0 = time.time()
+        # self.smm.set_volumes_in_primal()
+        # print("took {0}\n".format(time.time()-t0))
 
         # print('create_interfaces_primals')
         # t0 = time.time()

@@ -534,6 +534,7 @@ class Msclassic_bif_2_gr(Msclassic_bif):
             volumes_in_primal = set(fine_elems_in_primal) & set(volumes_in_primal_set)
             for volume in fine_elems_in_primal:
                 #3
+                import pdb; pdb.set_trace()
                 gid = self.mb.tag_get_data(self.global_id_tag, volume, flat=True)[0]
                 values, ids, local_elems, source_grav = self.mount_lines_3_bif_gr(volume, map_volumes, flag=4)
                 qw = 0

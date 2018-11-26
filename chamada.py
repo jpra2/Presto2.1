@@ -76,7 +76,7 @@ for i in cc:
 
 os.chdir(c3)
 
-#
+
 # for i in l10:
 #     os.system(i)
 

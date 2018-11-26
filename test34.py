@@ -2198,7 +2198,7 @@ class MsClassic_mono:
             index_columns = p[1]
             C.InsertGlobalValues(i, values, index_columns)
 
-        C.FillComplete()
+        # C.FillComplete()
 
         return C
 

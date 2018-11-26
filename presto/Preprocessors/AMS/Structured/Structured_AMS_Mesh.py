@@ -989,32 +989,47 @@ class Structured_AMS_Mesh:
         """
         all_fine_vols = self.mb.get_root_set()
         all_fine_vols = self.mb.get_entities_by_dimension(all_fine_vols, 3)
-
-        faces_wells_d_set = self.mb.create_meshset()
-        faces_all_fine_vols_ic_set = self.mb.create_meshset()
-        all_faces_set = self.mb.create_meshset()
         all_faces_boundary_set = self.mb.create_meshset()
-        set_faces = set()
 
-        for elem in all_fine_vols:
-            faces = self.mb.get_adjacencies(elem, 2, True)
-            self.mb.add_entities(all_faces_set, faces)
-            if elem in self.wells_d:
-                self.mb.add_entities(faces_wells_d_set, faces)
-            else:
-                self.mb.add_entities(faces_all_fine_vols_ic_set, faces)
-            for face in set(faces) - set_faces:
-                size = len(self.mb.get_adjacencies(face, 3))
-                if size < 2:
-                    self.mb.add_entities(all_faces_boundary_set, [face])
-                else:
-                    pass
-            set_faces.add(faces)
+        all_nodes = self.mb.get_entities_by_dimension(0, 0)
+        self.mesh_topo_util.construct_aentities(all_nodes)
+        all_faces = self.mb.get_entities_by_dimension(0, 2)
 
-        self.mb.tag_set_data(self.all_faces_tag, 0, all_faces_set)
+        for face in all_faces:
+             size = len(self.mb.get_adjacencies(face, 3))
+             if size < 2:
+                 self.mb.add_entities(all_faces_boundary_set, [face])
+             else:
+                 pass
+
         self.mb.tag_set_data(self.all_faces_boundary_tag, 0, all_faces_boundary_set)
-        self.mb.tag_set_data(self.faces_wells_d_tag, 0, faces_wells_d_set)
-        self.mb.tag_set_data(self.faces_all_fine_vols_ic_tag, 0, faces_all_fine_vols_ic_set)
+
+
+        # faces_wells_d_set = self.mb.create_meshset()
+        # faces_all_fine_vols_ic_set = self.mb.create_meshset()
+        # all_faces_set = self.mb.create_meshset()
+        # all_faces_boundary_set = self.mb.create_meshset()
+        # set_faces = set()
+        #
+        # for elem in all_fine_vols:
+        #     faces = self.mb.get_adjacencies(elem, 2, True)
+        #     self.mb.add_entities(all_faces_set, faces)
+        #     if elem in self.wells_d:
+        #         self.mb.add_entities(faces_wells_d_set, faces)
+        #     else:
+        #         self.mb.add_entities(faces_all_fine_vols_ic_set, faces)
+        #     for face in set(faces) - set_faces:
+        #         size = len(self.mb.get_adjacencies(face, 3))
+        #         if size < 2:
+        #             self.mb.add_entities(all_faces_boundary_set, [face])
+        #         else:
+        #             pass
+        #     set_faces.add(faces)
+        #
+        # self.mb.tag_set_data(self.all_faces_tag, 0, all_faces_set)
+        # self.mb.tag_set_data(self.all_faces_boundary_tag, 0, all_faces_boundary_set)
+        # self.mb.tag_set_data(self.faces_wells_d_tag, 0, faces_wells_d_set)
+        # self.mb.tag_set_data(self.faces_all_fine_vols_ic_tag, 0, faces_all_fine_vols_ic_set)
 
     def get_local_matrix(self, face, **options):
         """
@@ -1410,8 +1425,8 @@ class Structured_AMS_Mesh:
         obtem o vetor unitario positivo da direcao de l
 
         """
-        uni = l/np.linalg.norm(l)
-        uni = uni*uni
+        uni = np.absolute(l/np.linalg.norm(l))
+        # uni = uni*uni
 
         return uni
 
