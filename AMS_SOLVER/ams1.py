@@ -613,6 +613,42 @@ class AMS_mono:
 
         return Inv
 
+    def get_negative_inverse_by_inds(self, inds):
+        """
+        retorna inds da matriz inversa a partir das informacoes (inds) da matriz de entrada
+        """
+        assert inds[3][0] == inds[3][1]
+
+        cols = inds[3][1]
+        sz = [cols, cols]
+        A = self.get_CrsMatrix_by_inds(inds)
+
+        lines2 = np.array([])
+        cols2 = np.array([])
+        values2 = np.array([], dtype=np.float64)
+        map1 = Epetra.Map(cols, 0, self.comm)
+
+        for i in range(cols):
+            b = Epetra.Vector(map1)
+            b[i] = 1.0
+
+            x = self.solve_linear_problem(A, b, cols)
+
+            lines = np.nonzero(x[:])[0]
+            col = np.repeat(i, len(lines))
+            vals = x[lines]
+
+            lines2 = np.append(lines2, lines)
+            cols2 = np.append(cols2, col)
+            values2 = np.append(values2, vals)
+
+        lines2 = lines2.astype(np.int32)
+        cols2 = cols2.astype(np.int32)
+
+        inds2 = np.array([lines2, cols2, -1*values2, sz, lines2, cols2])
+
+        return inds2
+
     def get_local_matrix(self, global_matrix, id_rows, id_cols):
         rows = len(id_rows)
         cols = len(id_cols)
@@ -676,22 +712,84 @@ class AMS_mono:
 
         return A
 
-    def put_matrix_into_OP(self, M, rowsM, ind1, ind2):
+    def get_CrsMatrix_by_inds(self, inds):
         """
-        Coloca a Matriz (array numpy) M dentro do Operador de Prolongamento
+        retorna uma CrsMatrix a partir de inds
         input:
-            rowsM: numero de linhas de M
-            ind1: indice inicial da linha do OP
-            ind2: indice final da linha do OP
+            inds: array numpy com informacoes da matriz
+        output:
+            A: CrsMatrix
         """
 
-        lines = list(range(ind1, ind2))
-        colunas = np.nonzero(M)[1].astype(np.int32)
-        linhas = np.nonzero(M)[0]
+        rows = inds[3][0]
+        cols = inds[3][1]
 
-        values = M[linhas, colunas]
+        row_map = Epetra.Map(rows, 0, self.comm)
+        col_map = Epetra.Map(cols, 0, self.comm)
+        A = Epetra.CrsMatrix(Epetra.Copy, row_map, col_map, 7)
 
-        self.OP.InsertGlobalValues(lines, colunas, values)
+        A.InsertGlobalValues(inds[4], inds[5], inds[2])
+
+        return A
+
+    def get_slice_by_inds(self, info):
+        """
+        retorna as informacoes da matriz slice a partir de inds
+        input:
+        info: informacoes para obter o slice
+            inds: informacoes da matriz
+            slice_rows: array do slice das linhas
+            slice_cols: array do slice das colunas
+            n_rows: (opcional) numero de linhas da matriz que se quer obter
+            n_cols: (opcional) numero de colunas da matriz que se quer obter
+        output:
+            inds2: infoemacoes da matriz de saida
+        """
+
+        slice_rows = info['slice_rows']
+        slice_cols = info['slice_cols']
+        n_rows = info['n_rows']
+        n_cols = info['n_cols']
+        inds = info['inds']
+
+        lines2 = np.array([])
+        cols2 = np.array([])
+        values2 = np.array([], dtype=np.float64)
+
+
+        map_l = dict(zip(slice_rows, range(len(slice_rows))))
+        map_c = dict(zip(slice_cols, range(len(slice_cols))))
+
+        if n_rows == None and n_cols == None:
+            sz = [len(slice_rows), len(slice_cols)]
+        elif n_rows == None or n_cols == None:
+            print('especifique o numero de linhas e o numero de colunas')
+            sys.exit(0)
+        else:
+            sz = [n_rows, n_cols]
+
+        for i in slice_rows:
+            assert i in inds[0]
+            indices = np.where(inds[0] == i)[0]
+            cols = [inds[1][j] for j in indices if inds[1][j] in slice_cols]
+            vals = [inds[2][j] for j in indices if inds[1][j] in slice_cols]
+            lines = np.repeat(i, len(cols))
+
+            lines2 = np.append(lines2, lines)
+            cols2 = np.append(cols2, cols)
+            values2 = np.append(values2, vals)
+
+
+        lines2 = lines2.astype(np.int32)
+        cols2 = cols2.astype(np.int32)
+        local_inds_l = np.array([map_l[j] for j in lines2]).astype(np.int32)
+        local_inds_c = np.array([map_c[j] for j in cols2]).astype(np.int32)
+
+
+
+
+        inds2 = np.array([lines2, cols2, values2, sz, local_inds_l, local_inds_c])
+        return inds2
 
     def put_CrsMatrix_into_OP(self, M, ind1, ind2):
         """
@@ -711,7 +809,38 @@ class AMS_mono:
             line = map_lines[i]
             self.OP.InsertGlobalValues(line, p[0], p[1])
 
+    def put_indices_into_OP(self, inds, ind1, ind2):
+
+        n_rows = inds[3][0]
+        n_cols = inds[3][1]
+
+        map_lines = dict(zip(range(n_rows), range(ind1, ind2)))
+
+        lines = [map_lines[i] for i in inds[0]]
+        cols = inds[1]
+        values = inds[2]
+
+        self.OP.InsertGlobalValues(lines, cols, values)
+
+    def put_matrix_into_OP(self, M, rowsM, ind1, ind2):
+        """
+        Coloca a Matriz (array numpy) M dentro do Operador de Prolongamento
+        input:
+            rowsM: numero de linhas de M
+            ind1: indice inicial da linha do OP
+            ind2: indice final da linha do OP
+        """
+
+        lines = list(range(ind1, ind2))
+        colunas = np.nonzero(M)[1].astype(np.int32)
+        linhas = np.nonzero(M)[0]
+
+        values = M[linhas, colunas]
+
+        self.OP.InsertGlobalValues(lines, colunas, values)
+
     def get_OP(self):
+        self.verif = False
         lim = 1e-7
 
         # map_global_wirebasket = dict(zip(self.elems_wirebasket, range(self.nf)))
@@ -734,46 +863,108 @@ class AMS_mono:
         #elementos de aresta (edge)
         ind1 = idsf
         ind2 = idse
-        M = self.get_CrsMatrix_by_array(self.trans_mod[idsf:idse, idsf:idse])
-        M = self.get_inverse_tril(M, ne)
-        M = self.get_negative_matrix(M, ne)
-        M2 = self.get_CrsMatrix_by_array(self.trans_mod[idsf:idse, idse:idsv], n_rows = ne, n_cols = ne)
-        M = self.pymultimat(M, M2, ne)
-        M2 = self.modificar_matriz(M, ne, nv, ne)
-        self.put_CrsMatrix_into_OP(M2, ind1, ind2)
-        self.test_OP_tril(ind1 = idsf, ind2 = idse)
+        slice_rows = np.arange(ind1, ind2)
+        slice_cols = np.arange(ind1, ind2)
+        n_rows = None
+        n_cols = None
+        info = {'inds': self.inds_transmod, 'slice_rows': slice_rows, 'slice_cols': slice_cols, 'n_rows': n_rows, 'n_cols': n_cols}
+
+        indsM = self.get_negative_inverse_by_inds(self.get_slice_by_inds(info))
+        # M = self.get_CrsMatrix_by_array(self.trans_mod[idsf:idse, idsf:idse])
+        # M = self.get_inverse_tril(M, ne)
+        # M = self.get_negative_matrix(M, ne)
+        # M2 = self.get_CrsMatrix_by_array(self.trans_mod[idsf:idse, idse:idsv], n_rows = ne, n_cols = ne)
+
+        slice_rows = np.arange(ind1, ind2)
+        slice_cols = np.arange(idse, idsv)
+        n_rows = ne
+        n_cols = ne
+        info = {'inds': self.inds_transmod, 'slice_rows': slice_rows, 'slice_cols': slice_cols, 'n_rows': n_rows, 'n_cols': n_cols}
+        indsM2 = self.get_slice_by_inds(info)
+        M = self.pymultimat_by_inds(indsM, indsM2)
+        indsM2 = self.modificar_matriz(M, ne, nv, ne, return_inds = True)
+        self.put_indices_into_OP(indsM2, ind1, ind2)
+
+        # self.put_CrsMatrix_into_OP(M2, ind1, ind2)
+        self.test_OP_tril(ind1 = ind1, ind2 = ind2)
 
         #elementos de face
+        if nf > ne:
+            nvols = nf
+        else:
+            nvols = ne
         ind1 = idsi
         ind2 = idsf
-        M2 = self.get_CrsMatrix_by_array(self.trans_mod[idsi:idsf, idsi:idsf])
-        M2 = self.get_inverse_tril(M2, nf)
-        M2 = self.get_negative_matrix(M2, nf)
-        M3 = self.get_CrsMatrix_by_array(self.trans_mod[idsi:idsf, idsf:idse], n_rows = nf, n_cols = nf)
-        M = self.modificar_matriz(M, nf, nf, ne)
-        M = self.pymultimat(self.pymultimat(M2, M3, nf), M, nf)
-        M2 = self.modificar_matriz(M, nf, nv, nf)
-        self.put_CrsMatrix_into_OP(M2, ind1, ind2)
+        slice_rows = np.arange(ind1, ind2)
+        slice_cols = np.arange(ind1, ind2)
+        n_rows = nvols
+        n_cols = nvols
+        info = {'inds': self.inds_transmod, 'slice_rows': slice_rows, 'slice_cols': slice_cols, 'n_rows': n_rows, 'n_cols': n_cols}
+        indsM2 = self.get_negative_inverse_by_inds(self.get_slice_by_inds(info))
+
+        slice_rows = np.arange(ind1, ind2)
+        slice_cols = np.arange(idsf, idse)
+        n_rows = nvols
+        n_cols = nvols
+        info = {'inds': self.inds_transmod, 'slice_rows': slice_rows, 'slice_cols': slice_cols, 'n_rows': n_rows, 'n_cols': n_cols}
+        indsM3 = self.get_slice_by_inds(info)
+        indsM = self.modificar_matriz(M, nvols, nvols, ne, return_inds = True)
+        M = self.pymultimat_by_inds(self.pymultimat_by_inds(indsM2, indsM3, return_inds = True), indsM)
+        indsM2 = self.modificar_matriz(M, nf, nv, nf, return_inds = True)
+        self.put_indices_into_OP(indsM2, ind1, ind2)
+        nvols2 = nvols
+
+        # M2 = self.get_CrsMatrix_by_array(self.trans_mod[idsi:idsf, idsi:idsf])
+        # M2 = self.get_inverse_tril(M2, nf)
+        # M2 = self.get_negative_matrix(M2, nf)
+        # M3 = self.get_CrsMatrix_by_array(self.trans_mod[idsi:idsf, idsf:idse], n_rows = nf, n_cols = nf)
+        # M = self.modificar_matriz(M, nf, nf, ne)
+        # M = self.pymultimat(self.pymultimat(M2, M3, nf), M, nf)
+        #
+        # M2 = self.modificar_matriz(M, nf, nv, nf)
+        # self.put_CrsMatrix_into_OP(M2, ind1, ind2)
+
         self.test_OP_tril(ind1 = idsi, ind2 = idsf)
 
 
         #elementos internos
+        if ni > nf:
+            nvols = ni
+        else:
+            nvols = nf
+
         ind1 = 0
         ind2 = idsi
-        M2 = self.get_CrsMatrix_by_array(self.trans_mod[0:idsi, 0:idsi])
-        M2 = self.get_inverse_tril(M2, ni)
-        M2 = self.get_negative_matrix(M2, ni)
-        M3 = self.get_CrsMatrix_by_array(self.trans_mod[0:idsi, idsi:idsf], n_rows = ni, n_cols = ni)
-        M = self.modificar_matriz(M, ni, ni, nf)
-        M = self.pymultimat(self.pymultimat(M2, M3, ni), M, ni)
 
-        # M_test = np.zeros((ni, ni), dtype='float64')
-        # for i in range(ni):
-        #     p = M.ExtractGlobalRowCopy(i)
-        #     M_test[i, p[1]] = p[0]
+        slice_rows = np.arange(ind1, ind2)
+        slice_cols = np.arange(ind1, ind2)
+        n_rows = None
+        n_cols = None
+        info = {'inds': self.inds_transmod, 'slice_rows': slice_rows, 'slice_cols': slice_cols, 'n_rows': n_rows, 'n_cols': n_cols}
+        indsM2 = self.modificar_matriz_by_inds(self.get_negative_inverse_by_inds(self.get_slice_by_inds(info)), nvols, nvols)
+
+        slice_rows = np.arange(ind1, ind2)
+        slice_cols = np.arange(idsi, idsf)
+        n_rows = nvols
+        n_cols = nvols
+        info = {'inds': self.inds_transmod, 'slice_rows': slice_rows, 'slice_cols': slice_cols, 'n_rows': n_rows, 'n_cols': n_cols}
+        indsM3 = self.get_slice_by_inds(info)
+        indsM = self.modificar_matriz(M, nvols, nvols, nvols2, return_inds = True)
+        # self.verif = True
+        # import pdb; pdb.set_trace()
+        M = self.pymultimat_by_inds(self.pymultimat_by_inds(indsM2, indsM3, return_inds = True), indsM)
+
+        indsM2 = self.modificar_matriz(M, ni, nv, ni, return_inds = True)
+        self.put_indices_into_OP(indsM2, ind1, ind2)
+
+        # M2 = self.get_CrsMatrix_by_array(self.trans_mod[0:idsi, 0:idsi])
+        # M2 = self.get_inverse_tril(M2, ni)
+        # M2 = self.get_negative_matrix(M2, ni)
+        # M3 = self.get_CrsMatrix_by_array(self.trans_mod[0:idsi, idsi:idsf], n_rows = ni, n_cols = ni)
         #
-        # np.save('test_op_tril', M_test)
-        M2 = self.modificar_matriz(M, ni, nv, ni)
+        # M = self.modificar_matriz(M, ni, ni, nf)
+        # M = self.pymultimat(self.pymultimat(M2, M3, ni), M, ni)
+        # M2 = self.modificar_matriz(M, ni, nv, ni)
 
         # for i in range(ni):
         #     p = M2.ExtractGlobalRowCopy(i)
@@ -786,7 +977,7 @@ class AMS_mono:
         #         import pdb; pdb.set_trace()
         # import pdb; pdb.set_trace()
 
-        self.put_CrsMatrix_into_OP(M2, ind1, ind2)
+        # self.put_CrsMatrix_into_OP(M2, ind1, ind2)
         self.test_OP_tril(ind1 = 0, ind2 = idsi)
 
         # self.OP = self.pymultimat(self.G, self.OP, self.nf, transpose_A = True)
@@ -806,7 +997,13 @@ class AMS_mono:
         OP[idsi:idsf] = -np.dot(np.dot(np.linalg.inv(self.trans_mod[idsi:idsf, idsi:idsf]), self.trans_mod[idsi:idsf, idsf:idse]), OP[idsf:idse])
         OP[0:idsi] = -np.dot(np.dot(np.linalg.inv(self.trans_mod[0:idsi, 0:idsi]), self.trans_mod[0:idsi, idsi:idsf]), OP[idsi:idsf])
 
-        # np.save('test_op_numpy', OP[0:idsi])
+        np.save('test_op_slice_numpy',self.trans_mod[0:idsi, idsi:idsf])
+        import pdb; pdb.set_trace()
+
+        # A = np.linalg.inv(self.trans_mod[0:idsi, 0:idsi])
+        #
+        # np.save('test_inv_int_numpy', A)
+
 
 
         # for i in range(self.nni):
@@ -907,6 +1104,71 @@ class AMS_mono:
         """
         return tools_c.mod_transfine_multivector(self.nf, self.comm, self.trans_fine_wirebasket, self.intern_elems, self.face_elems, self.edge_elems, self.vertex_elems)
 
+    def mod_transfine_wirebasket_by_inds(self, inds):
+        ni = len(self.intern_elems)
+        nf = len(self.face_elems)
+        ne = len(self.edge_elems)
+        nv = len(self.vertex_elems)
+
+        lines2 = np.array([], dtype=np.int32)
+        cols2 = lines2.copy()
+        values2 = np.array([], dtype='float64')
+
+        os.chdir('/elliptic/AMS_SOLVER/')
+        # M0 = np.load('transmod_tril.npy')
+        M1 = np.load('transmod.npy')
+
+        lines = set(inds[0])
+        sz = inds[3][:]
+
+        verif1 = ni
+        verif2 = ni+nf
+        rg1 = np.arange(ni, ni+nf)
+
+
+        for i in lines:
+            indice = np.where(inds[0] == i)[0]
+            if i < ni:
+                lines2 = np.hstack((lines2, inds[0][indice]))
+                cols2 = np.hstack((cols2, inds[1][indice]))
+                values2 = np.hstack((values2, inds[2][indice]))
+                continue
+            elif i >= ni+nf+ne:
+                continue
+            elif i in rg1:
+                verif = verif1
+            else:
+                verif = verif2
+
+            lines_0 = inds[0][indice]
+            cols_0 = inds[1][indice]
+            vals_0 = inds[2][indice]
+
+            inds_minors = np.where(cols_0 < verif)[0]
+            vals_minors = vals_0[inds_minors]
+
+            vals_0[np.where(cols_0 == i)[0]] += sum(vals_minors)
+            inds_sup = np.where(cols_0 >= verif)[0]
+            lines_0 = lines_0[inds_sup]
+            cols_0 = cols_0[inds_sup]
+            vals_0 = vals_0[inds_sup]
+
+
+            lines2 = np.hstack((lines2, lines_0))
+            cols2 = np.hstack((cols2, cols_0))
+            values2 = np.hstack((values2, vals_0))
+
+        lines2 = lines2.astype(np.int32)
+        cols2 = cols2.astype(np.int32)
+
+        inds2 = np.array([lines2, cols2, values2, sz])
+
+        tt = np.zeros((729, 729))
+        tt[lines2, cols2] = values2
+        np.save('transmod_tril',tt)
+
+        return inds2
+
     def mod_transfine_numpy(self, trans_fine_wirebasket):
         """
         Modificacao da transmissibilidade da malha fina
@@ -985,17 +1247,24 @@ class AMS_mono:
             self.C[idx, idx] = 1.0
             self.OP[idx] = temp2.copy()
 
-    def modificar_matriz(self, A, rows, columns, walk_rows):
+    def modificar_matriz(self, A, rows, columns, walk_rows, return_inds = False):
         """
         Modifica a matriz A para o tamanho (rows x columns)
         input:
             walk_rows: linhas para caminhar na matriz A
             rows: numero de linhas da nova matriz (C)
             columns: numero de colunas da nova matriz (C)
+            return_inds: se return_inds = True retorna os indices das linhas, colunas
+                         e respectivos valores
         output:
             C: CrsMatrix  rows x columns
 
         """
+        lines = np.array([], dtype=np.int32)
+        cols = lines.copy()
+        valuesM = np.array([], dtype='float64')
+        sz = [rows, columns]
+
 
         row_map = Epetra.Map(rows, 0, self.comm)
         col_map = Epetra.Map(columns, 0, self.comm)
@@ -1007,10 +1276,24 @@ class AMS_mono:
             values = p[0]
             index_columns = p[1]
             C.InsertGlobalValues(i, values, index_columns)
+            lines = np.append(lines, np.repeat(i, len(values)))
+            cols = np.append(cols, p[1])
+            valuesM = np.append(valuesM, p[0])
 
-        # C.FillComplete()
+        lines = lines.astype(np.int32)
+        cols = cols.astype(np.int32)
 
-        return C
+        if return_inds == True:
+            inds = [lines, cols, valuesM, sz, lines, cols]
+            return inds
+        else:
+            return C
+
+    def modificar_matriz_by_inds(self, inds, n_rows, n_cols):
+
+        inds2 = inds[:]
+        inds2[3] = [n_rows, n_cols]
+        return inds2
 
     def mount_lines_3(self, elem, map_local, **options):
         """
@@ -1185,8 +1468,11 @@ class AMS_mono:
     def pymultimat(self, A, B, nf, transpose_A = False, transpose_B = False):
         """
         Multiplica a matriz A pela matriz B ambas de mesma ordem e quadradas
+        nf: ordem da matriz
 
         """
+        if self.verif == True:
+            import pdb; pdb.set_trace()
         if A.Filled() == False:
             A.FillComplete()
         if B.Filled() == False:
@@ -1199,6 +1485,35 @@ class AMS_mono:
         EpetraExt.Multiply(A, transpose_A, B, transpose_B, C)
 
         # C.FillComplete()
+
+        return C
+
+    def pymultimat_by_inds(self, indsA, indsB, return_inds = False):
+        """
+        Multiplica a matriz A pela matriz B ambas de mesma ordem e quadradas
+        nf: ordem da matriz
+
+        """
+        assert indsA[3][0] == indsA[3][1]
+        assert indsB[3][0] == indsB[3][1]
+        assert indsA[3][0] == indsB[3][0]
+
+        n = indsA[3][0]
+
+        n_map = Epetra.Map(n, 0, self.comm)
+
+        A = Epetra.CrsMatrix(Epetra.Copy, n_map, 3)
+        B = Epetra.CrsMatrix(Epetra.Copy, n_map, 3)
+
+        A.InsertGlobalValues(indsA[4], indsA[5], indsA[2])
+        B.InsertGlobalValues(indsB[4], indsB[5], indsB[2])
+
+        C = self.pymultimat(A, B, n)
+
+        if return_inds == True:
+            indsC = self.modificar_matriz(C, indsA[3][0], indsA[3][0], indsA[3][0], return_inds = True)
+            return indsC
+
 
         return C
 
@@ -1353,19 +1668,36 @@ class AMS_mono:
 
         return trans_fine, b, s
 
-    def set_global_problem_AMS_gr_faces(self, map_global):
+    def set_global_problem_AMS_gr_faces(self, map_global, return_inds = False):
         """
         transmissibilidade da malha fina
         input:
             map_global: mapeamento global
+            return_inds: se return_inds == True, retorna o mapeamento da matriz sendo:
+                         inds[0] = linhas
+                         inds[1] = colunas
+                         inds[2] = valores
+                         inds[3] = tamanho da matriz trans_fine
 
         output:
             trans_fine: (multivector) transmissiblidade da malha fina
             b: (vector) termo fonte total
             s: (vector) termo fonte apenas da gravidade
-        obs: com funcao para obter dados dos elementos
+            inds: mapeamento da matriz transfine
         """
         #0
+
+        linesM = np.array([], dtype=np.int32)
+        colsM = linesM.copy()
+        valuesM = np.array([], dtype='float64')
+        linesM2 = linesM.copy()
+        valuesM2 = valuesM.copy()
+        szM = [self.nf, self.nf]
+
+        # lines = np.append(lines, np.repeat(i, len(values)))
+        # cols = np.append(cols, p[1])
+        # valuesM = np.append(valuesM, p[0])
+
         all_faces = self.mb.get_entities_by_dimension(0, 2)
         all_faces_boundary_set = self.mb.tag_get_data(self.all_faces_boundary_tag, 0, flat=True)[0]
         all_faces_boundary_set = self.mb.get_entities_by_handle(all_faces_boundary_set)
@@ -1373,16 +1705,59 @@ class AMS_mono:
         std_map = Epetra.Map(self.nf, 0, self.comm)
         # trans_fine = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
         # trans_fine = Epetra.MultiVector(std_map, self.nf)
-        trans_fine = np.zeros((self.nf, self.nf), dtype='float64')
         b = Epetra.Vector(std_map)
         s = Epetra.Vector(std_map)
+
+        cont = 0
 
         for face in set(all_faces) - set(all_faces_boundary_set):
             #1
             keq, s_grav, elems = self.get_kequiv_by_face(face)
-            cols = [map_global[elems[0]], map_global[elems[1]], map_global[elems[0]], map_global[elems[1]]]
-            lines = [map_global[elems[1]], map_global[elems[0]], map_global[elems[0]], map_global[elems[1]]]
-            values = [-keq, -keq, keq, keq]
+            cols = np.array((map_global[elems[0]], map_global[elems[1]], map_global[elems[0]], map_global[elems[1]]), dtype=np.int32)
+            lines = np.array((map_global[elems[1]], map_global[elems[0]], map_global[elems[0]], map_global[elems[1]]), dtype=np.int32)
+            values = np.array((-keq, -keq, keq, keq), dtype='float64')
+
+            linesM = np.hstack((linesM, [map_global[elems[0]], map_global[elems[1]]]))
+            colsM = np.hstack((colsM, [map_global[elems[1]], map_global[elems[0]]]))
+            valuesM = np.hstack((valuesM, [-keq, -keq]))
+
+            ind0 = np.where(linesM2 == map_global[elems[0]])
+            if len(ind0[0]) == 0:
+                linesM2 = np.hstack((linesM2, map_global[elems[0]]))
+                valuesM2 = np.hstack((valuesM2, [keq]))
+            else:
+                valuesM2[ind0] += keq
+
+            ind1 = np.where(linesM2 == map_global[elems[1]])
+            if len(ind1[0]) == 0:
+                linesM2 = np.hstack((linesM2, map_global[elems[1]]))
+                valuesM2 = np.hstack((valuesM2, [keq]))
+            else:
+                valuesM2[ind1] += keq
+
+
+            # cols2 = [map_global[elems[0]], map_global[elems[1]], map_global[elems[0]], map_global[elems[1]]]
+            # lines2 = [map_global[elems[1]], map_global[elems[0]], map_global[elems[0]], map_global[elems[1]]]
+            # values2 = [-keq, -keq, keq, keq]
+
+
+
+            # linesM = np.append(linesM, lines)
+            # colsM = np.append(colsM, cols)
+            # valuesM = np.append(valuesM, values)
+
+            # linesM = np.concatenate((linesM, lines))
+            # colsM = np.concatenate((colsM, cols))
+            # valuesM = np.concatenate((valuesM, values))
+
+            # linesM = np.hstack((linesM, lines))
+            # colsM = np.hstack((colsM, cols))
+            # valuesM = np.hstack((valuesM, values))
+            # linesM = np.hstack((linesM, lines))
+            # colsM = np.hstack((colsM, cols))
+            # valuesM = np.insert(valuesM, -1, values)
+
+
             s[map_global[elems[0]]] += s_grav
             b[map_global[elems[0]]] += s_grav
             s[map_global[elems[1]]] += -s_grav
@@ -1390,7 +1765,7 @@ class AMS_mono:
 
             ###################################
             # Para o caso que trans_fine = MultiVector ou array do numpy
-            trans_fine[lines, cols] += values
+            # trans_fine[lines, cols] += values
 
             ###################################
 
@@ -1410,8 +1785,15 @@ class AMS_mono:
             # trans_fine.SumIntoGlobalValues(lines, cols, values)
             #####################################################
 
+        linesM = np.hstack((linesM, linesM2))
+        colsM = np.hstack((colsM, linesM2))
+        valuesM = np.hstack((valuesM, valuesM2))
+        inds = np.array([linesM, colsM, valuesM, szM])
 
-        return trans_fine, b, s
+        if return_inds == True:
+            return b, s, inds
+        else:
+            return b, s
 
     def set_global_problem_AMS_gr_numpy(self, map_global):
         """
@@ -1861,11 +2243,55 @@ class AMS_mono:
         """
         map_global_wirebasket = dict(zip(self.elems_wirebasket, range(self.nf)))
         self.G = self.permutation_matrix_1()
-        self.trans_fine_wirebasket, b_wirebasket, source_grav = self.set_global_problem_AMS_gr_faces(map_global_wirebasket)
+        b_wirebasket, source_grav, self.inds = self.set_global_problem_AMS_gr_faces(map_global_wirebasket, return_inds = True)
+        self.inds_transmod = self.mod_transfine_wirebasket_by_inds(self.inds)
 
-        self.trans_mod = self.mod_transfine_multivector()
+        # self.trans_mod = self.mod_transfine_multivector()
+        t0 = time.time()
         self.get_OP()
-        self.test_OP_tril()
+        t1 = time.time()
+        print('tempo operador de prolongamento')
+        print('{0}'.format(t1-t0))
+        import pdb; pdb.set_trace()
 
 
         import pdb; pdb.set_trace()
+
+    def test_apply_trilinos(self):
+
+        # comm = Epetra.PyComm()
+        # mat1 = Epetra.SerialDenseMatrix(3,3)
+        # mat1.Random()
+        # mat2 = Epetra.SerialDenseMatrix([[1,0,0],
+        # [0,1,0],[0,0,1]])
+        # mat3 = Epetra.SerialDenseMatrix(mat1)
+        # #mat3 = mat1.mat2
+        # mat2.Apply(mat1,mat3)
+        # print(mat3)
+
+        ################################################
+        # n = 5
+        # std_map = Epetra.Map(n, 0, self.comm)
+        # A = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        # # B = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        # # C = Epetra.CrsMatrix(Epetra.Copy, std_map, 7)
+        #
+        # B = Epetra.MultiVector(std_map, n)
+        # C = Epetra.MultiVector(std_map, n)
+        #
+        #
+        # for i in range(n):
+        #     if i == 0 or i == n-1:
+        #         A.InsertGlobalValues(i, [1.0], [i])
+        #     else:
+        #         A.InsertGlobalValues(i, [-1.0, 2.0, -1.0], [i-1, i, i+1])
+        #     # B.InsertGlobalValues(i, [1.0], [i])
+        #     B[i,i] = 1.0
+        #
+        #
+        # res = A.ApplyInverse(B, C)
+        #
+        # print(C)
+
+        import pdb; pdb.set_trace()
+        pass
