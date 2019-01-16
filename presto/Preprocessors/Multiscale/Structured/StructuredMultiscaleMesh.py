@@ -612,7 +612,6 @@ class StructuredMultiscaleMesh:
 
     def generate_dual(self):
 
-
         min_coarse_ids = np.array([0, 0, 0])
         max_coarse_ids = np.array([max(self.primal_ids[0]),
                                    max(self.primal_ids[1]),

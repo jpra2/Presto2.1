@@ -868,7 +868,6 @@ class AMS_mono:
         n_rows = None
         n_cols = None
         info = {'inds': self.inds_transmod, 'slice_rows': slice_rows, 'slice_cols': slice_cols, 'n_rows': n_rows, 'n_cols': n_cols}
-
         indsM = self.get_negative_inverse_by_inds(self.get_slice_by_inds(info))
         # M = self.get_CrsMatrix_by_array(self.trans_mod[idsf:idse, idsf:idse])
         # M = self.get_inverse_tril(M, ne)

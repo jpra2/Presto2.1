@@ -16,7 +16,7 @@ class Msclassic_bif_2(Msclassic_bif):
     def __init__(self):
         super().__init__()
 
-    def calculate_local_problem_het_elem(self, elems, lesser_dim_meshsets, support_vals_tag):
+    def calculate_local_problem_het_elem(self, elems, lesser_dim_meshsets, support_vals_tag, name_tag):
         lim = 1e-9
         all_elems_bound = [self.mb.get_entities_by_handle(ms) for ms in lesser_dim_meshsets]
         soma = sum(
@@ -134,6 +134,7 @@ class Msclassic_bif_2(Msclassic_bif):
             support_vals_tag = self.mb.tag_get_handle(
                 "TMP_SUPPORT_VALS {0}".format(primal_id), 1, types.MB_TYPE_DOUBLE, True,
                 types.MB_TAG_SPARSE, default_value=0.0)
+            name_tag = "TMP_SUPPORT_VALS {0}".format(primal_id)
 
             self.mb.tag_set_data(support_vals_tag, self.all_fine_vols, zeros)
             self.mb.tag_set_data(support_vals_tag, collocation_point, 1.0)
@@ -162,15 +163,15 @@ class Msclassic_bif_2(Msclassic_bif):
 
                         # a partir desse ponto op de prolongamento eh preenchido
                         self.calculate_local_problem_het_elem(
-                            elems_edg, c_vertices, support_vals_tag)
+                            elems_edg, c_vertices, support_vals_tag, name_tag)
 
                     self.calculate_local_problem_het_elem(
-                        elems_fac, c_edges, support_vals_tag)
+                        elems_fac, c_edges, support_vals_tag, name_tag)
 
 
                    # print "support_val_tag" , mb.tag_get_data(support_vals_tag,elems_edg)
                 self.calculate_local_problem_het_elem(
-                    elems_vol, c_faces, support_vals_tag)
+                    elems_vol, c_faces, support_vals_tag, name_tag)
 
 
                 vals = self.mb.tag_get_data(support_vals_tag, elems_vol, flat=True)
